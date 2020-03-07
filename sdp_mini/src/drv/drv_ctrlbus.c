@@ -29,9 +29,11 @@
  */
 
 #include "common/common.h"
+#include "ctrl_bus_cmd.h"
+#include "beep.h"
 
 baseInfo_t baseInfo;
-static _u8 currentNcmd;
+_u8 currentNcmd;
 /*
  * ctrlbus nCMD脚初始化函数
  * 填充baseInfo，slamcore会要
@@ -63,7 +65,7 @@ void set_drv_ctrlbus_ncmd(_u8 ncmd)
 /*
  * ctrlbus nCMD脚拉高函数
  */
-void clear_drv_ctrlbus_ncmd(void)
+void clear_drv_ctrlbus_ncmd()
 {
     pinMode(CTRLBUS_CCMD_PORT, CTRLBUS_CCMD_PIN, GPIO_Mode_Out_OD, GPIO_Speed_50MHz);
     PIN_SET(CTRLBUS_CCMD_PORT, CTRLBUS_CCMD_PIN, HIGH);
@@ -73,24 +75,46 @@ void clear_drv_ctrlbus_ncmd(void)
  * 获取ctrlbus nCMD脚状态函数
  * 预留
  */
-bool is_drv_ctrlbus_ncmd(void)
+bool is_drv_ctrlbus_ncmd()
 {
     return !(currentNcmd == (_u8) - 1);
-}
-/*
- * 获取ctrlbus nCMD函数
- * 预留
- */
-_u8 get_drv_ctrlbus_ncmd(void)
-{
-    return currentNcmd;
 }
 /*
  * 获取ctrlbus nCMD脚状态忙函数
  * 预留
  */
-bool is_drv_ctrlbus_busy(void)
+bool is_drv_ctrlbus_busy()
 {
     pinMode(CTRLBUS_CBUSY_PORT, CTRLBUS_CBUSY_PIN, GPIO_Mode_IN_FLOATING, GPIO_Speed_50MHz);
     return PIN_READ(CTRLBUS_CBUSY_PORT, CTRLBUS_CBUSY_PIN);
+}
+
+void drv_ctrlbus_wifi_reset(void)
+{
+    if (!is_drv_ctrlbus_ncmd()) {
+        set_drv_ctrlbus_ncmd(SLAMWARECORECB_BASE_CMD_RESET_WIFI);
+        /* Play beep info. */
+        beep_beeper(5000, 600, 2);
+    }
+}
+
+void drv_ctrlbus_start_sweep(void)
+{
+    if (!is_drv_ctrlbus_ncmd()) {
+        set_drv_ctrlbus_ncmd(SLAMWARECORECB_BASE_CMD_START_SWEEP);
+    }
+}
+
+void drv_ctrlbus_spot_sweep(void)
+{
+    if (!is_drv_ctrlbus_ncmd()) {
+        set_drv_ctrlbus_ncmd(SLAMWARECORECB_BASE_CMD_SPOT_SWEEP);
+    }
+}
+
+void drv_ctrlbus_stop_sweep(void)
+{
+    if (!is_drv_ctrlbus_ncmd()) {
+        set_drv_ctrlbus_ncmd(SLAMWARECORECB_BASE_CMD_STOP_SWEEP);
+    }
 }

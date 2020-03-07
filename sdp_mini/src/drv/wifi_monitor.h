@@ -27,51 +27,12 @@
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-#pragma once
 
-#include <stdio.h>
 #include "common/common.h"
-#include "drv/ctrl_bus_cmd.h"
+#include "drv_ctrlbus.h"
 
-#define CONFIG_HEALTH_MONITOR_TICKS     100
+void wifi_monitor_init(void);
+void wifi_monitor_heartbeat(void);
+void wifi_monitor_reset_cfg(void);
 
-#define CONFIG_HEALTH_MONITOR_NUM       10
-
-#define HEALTH_MONITOR_EID_NONE         0
-
-#define CONFIG_HEALTH_DESC_SIZE         32
-
-/* health status strcture. */
-typedef struct _health_status {
-    _u8 flag;           /**< Health status flag. */
-    _u8 count;          /**< Health error count. */
-} health_status_t;
-
-/**
- Health callback function.
-
- The return code could be:
-    SLAMWARECORECB_HEALTH_FLAG_OK
-    SLAMWARECORECB_HEALTH_FLAG_WARN
-    SLAMWARECORECB_HEALTH_FLAG_ERROR
-    SLAMWARECORECB_HEALTH_FLAG_FATAL
- */
-typedef _u8 (*health_cb_t)(void);
-
-/* health description structure. */
-typedef struct _health_desc {
-    _u32         eid;                           /**< Error id. */
-    char         desc[CONFIG_HEALTH_DESC_SIZE]; /**< Error description. */
-    health_cb_t  hcb;                           /**< Health callback function. */
-} health_desc_t;
-
-/* health monitor public functions. */
-void health_monitor_init(void);
-void health_monitor_exit(void);
-bool health_monitor_register(_u32 eid, const char *desc, health_cb_t hcb);
-bool health_monitor_deregister(_u32 eid);
-void health_monitor_heartbeat(void);
-bool health_monitor_get_status(_u8 *status, _u8 *count);
-_u32 health_monitor_get_error(_u8 id);
-const char *health_monitor_get_desc(_u8 id);
-bool health_monitor_clear(_u32 eid);
+#define init_wifi_monitor   wifi_monitor_init

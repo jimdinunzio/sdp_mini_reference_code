@@ -27,42 +27,52 @@
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
+#ifndef __EXTI_H
+#define __EXTI_H
 
-#pragma once
 #include "common/common.h"
+#include <stdio.h>
 
+#define CONFIG_EXTI_MAX_NUM             16  /**< Maximum external line channels. */
+#define CONFIG_EXIT_IRQ_NUM             7   /**< External irq number, irq EXTI0~EXTI4, EXTI9-5, EXTI15-10 */
 
-#define HOCHARGE_DETECT         GPIO_Pin_10
-#define DCCHARGE_DETECT         GPIO_Pin_11
-#define BATT_FAULT              GPIO_Pin_4
-#define BATT_CHRG               GPIO_Pin_3
-#define BATT_READY              GPIO_Pin_2
+/**
+ @brief get gpio port source by port id.
+ @param port - gpio port id.
+ @return return gpio source number.
+ */
+static inline _u8 GPIO_PortSource(GPIO_TypeDef *port)
+{
+    if (port == NULL) {
+        return 0;
+    }
+    if (port == GPIOA) {
+        return GPIO_PortSourceGPIOA;
+    } else if (port == GPIOB) {
+        return GPIO_PortSourceGPIOB;
+    } else if (port == GPIOC) {
+        return GPIO_PortSourceGPIOC;
+    } else if (port == GPIOD) {
+        return GPIO_PortSourceGPIOD;
+    } else if (port == GPIOE) {
+        return GPIO_PortSourceGPIOE;
+    } else if (port == GPIOF) {
+        return GPIO_PortSourceGPIOF;
+    } else if (port == GPIOG) {
+        return GPIO_PortSourceGPIOG;
+    } else {
+        return 0;
+    }
+}
 
-#define BATT_DETECT_PORT        GPIOA
-#define BATT_DETECT_PIN         GPIO_Pin_6
-#define BATT_DETECT_ADC         1
-#define BATT_DETECT_ADC_CHN     6
-#define BATT_DETECT_ADC_RATIO   11.0f
-#define BATT_DETECT_ADC_REF     2495
+#define EXTI_LINE(l)        (EXTI_Line0 << (l))
 
-#define ISCHARGE_FAULT            0x0
-#define ISCHARGE_CHRG             0x1
-#define ISCHARGE_NOCHRG           0x2
-#define ISCHARGE_COMPLETE         0x3
+/**
+ @brief External line interrupt call back function.
+ */
+typedef void (*exti_cb_t)(void);
 
-#define BATT_VOLUME_CALIBRATING_DURATION 5000   /* Volume calibrating duration, in ms. */
-#define BATT_VOLUME_UPDATE_DURATION      30000  /* Volume updating duration, in ms. */
+bool exti_reg_callback(_u8 exti, EXTITrigger_TypeDef type, exti_cb_t cb);
+void exti_unreg_callback(_u8 exti);
 
-// the voltage scale factor to transform the voltage on the ADC pin to the actual battery voltage
-// it is controlled by the resistor network, please refer to the ref design schematic for details
-#define BATTERY_VOLTAGE_FULL    ((int)(11.2 * 1000)) //mV
-#define BATTERY_VOLTAGE_EMPTY   ((int)(7.2 * 1000)) //mV
-
-void init_battery(void);
-_u32 get_electricity(void);
-_u8 get_electricitypercentage(void);
-_u8 charge_detect_getstatus(void);
-_s8 get_dc_charge_status(void);
-_s8 get_home_charge_status(void);
-void heartbeat_battery(void);
-
+#endif

@@ -30,7 +30,14 @@
 
 #pragma once
 
+#include "common/common.h"
+
 void init_drv_ctrlbus();
+void set_drv_ctrlbus_ncmd(_u8 ncmd);
 void clear_drv_ctrlbus_ncmd();
-bool is_drv_ctrlbus_ncmd(void);
-_u8 get_drv_ctrlbus_ncmd(void);
+bool is_drv_ctrlbus_ncmd();
+bool is_drv_ctrlbus_busy();
+void drv_ctrlbus_wifi_reset(void);
+void drv_ctrlbus_start_sweep(void);
+void drv_ctrlbus_spot_sweep(void);
+void drv_ctrlbus_stop_sweep(void);

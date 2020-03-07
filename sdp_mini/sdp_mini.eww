@@ -2,7 +2,7 @@
 
 <workspace>
   <project>
-    <path>$WS_DIR$\base_ref.ewp</path>
+    <path>$WS_DIR$\sdp_mini.ewp</path>
   </project>
   <batchBuild/>
 </workspace>

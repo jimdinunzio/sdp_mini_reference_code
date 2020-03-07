@@ -1,5 +1,5 @@
 /*
- * SlamTec Base Ref Design
+ * SlamTec Infra Runtime Public
  * Copyright 2009 - 2017 RoboPeak
  * Copyright 2013 - 2017 Shanghai SlamTec Co., Ltd.
  * http://www.slamtec.com
@@ -27,42 +27,15 @@
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-
-#pragma once
 #include "common/common.h"
+#include "drv/timer.h"
 
-
-#define HOCHARGE_DETECT         GPIO_Pin_10
-#define DCCHARGE_DETECT         GPIO_Pin_11
-#define BATT_FAULT              GPIO_Pin_4
-#define BATT_CHRG               GPIO_Pin_3
-#define BATT_READY              GPIO_Pin_2
-
-#define BATT_DETECT_PORT        GPIOA
-#define BATT_DETECT_PIN         GPIO_Pin_6
-#define BATT_DETECT_ADC         1
-#define BATT_DETECT_ADC_CHN     6
-#define BATT_DETECT_ADC_RATIO   11.0f
-#define BATT_DETECT_ADC_REF     2495
-
-#define ISCHARGE_FAULT            0x0
-#define ISCHARGE_CHRG             0x1
-#define ISCHARGE_NOCHRG           0x2
-#define ISCHARGE_COMPLETE         0x3
-
-#define BATT_VOLUME_CALIBRATING_DURATION 5000   /* Volume calibrating duration, in ms. */
-#define BATT_VOLUME_UPDATE_DURATION      30000  /* Volume updating duration, in ms. */
-
-// the voltage scale factor to transform the voltage on the ADC pin to the actual battery voltage
-// it is controlled by the resistor network, please refer to the ref design schematic for details
-#define BATTERY_VOLTAGE_FULL    ((int)(11.2 * 1000)) //mV
-#define BATTERY_VOLTAGE_EMPTY   ((int)(7.2 * 1000)) //mV
-
-void init_battery(void);
-_u32 get_electricity(void);
-_u8 get_electricitypercentage(void);
-_u8 charge_detect_getstatus(void);
-_s8 get_dc_charge_status(void);
-_s8 get_home_charge_status(void);
-void heartbeat_battery(void);
-
+/**
+ @brief timer channel function array.
+ */
+const tim_func_t g_tim_func[] = {
+    {TIM_OC1Init, TIM_OC1PreloadConfig, TIM_SetCompare1},
+    {TIM_OC2Init, TIM_OC2PreloadConfig, TIM_SetCompare2},
+    {TIM_OC3Init, TIM_OC3PreloadConfig, TIM_SetCompare3},
+    {TIM_OC4Init, TIM_OC4PreloadConfig, TIM_SetCompare4},
+};

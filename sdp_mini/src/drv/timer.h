@@ -1,5 +1,5 @@
 /*
- * SlamTec Base Ref Design
+ * SlamTec Infra Runtime Public
  * Copyright 2009 - 2017 RoboPeak
  * Copyright 2013 - 2017 Shanghai SlamTec Co., Ltd.
  * http://www.slamtec.com
@@ -28,41 +28,45 @@
  *
  */
 
-#pragma once
-#include "common/common.h"
+#ifndef __TIMER_H
+#define __TIMER_H
 
+/**
+ @brief Timer function defintions.
+ */
+typedef void (*tim_oc_init_t)(TIM_TypeDef*, TIM_OCInitTypeDef*);
+typedef void (*tim_oc_preloadcfg)(TIM_TypeDef* TIMx, uint16_t TIM_OCPreload);
+typedef void (*tim_set_compare)(TIM_TypeDef* TIMx, uint16_t Compare3);
 
-#define HOCHARGE_DETECT         GPIO_Pin_10
-#define DCCHARGE_DETECT         GPIO_Pin_11
-#define BATT_FAULT              GPIO_Pin_4
-#define BATT_CHRG               GPIO_Pin_3
-#define BATT_READY              GPIO_Pin_2
+/**
+ @brief timer function strcture.
+ */
+typedef struct tim_func {
+    tim_oc_init_t     oc_init;          /**< Timer oc init function. */
+    tim_oc_preloadcfg oc_preloadcfg;    /**< Timer oc preload configure function. */
+    tim_set_compare   set_compare;      /**< Timer set compare status function. */
+} tim_func_t;
 
-#define BATT_DETECT_PORT        GPIOA
-#define BATT_DETECT_PIN         GPIO_Pin_6
-#define BATT_DETECT_ADC         1
-#define BATT_DETECT_ADC_CHN     6
-#define BATT_DETECT_ADC_RATIO   11.0f
-#define BATT_DETECT_ADC_REF     2495
+extern const tim_func_t g_tim_func[];   /**< Global timer function array. */
 
-#define ISCHARGE_FAULT            0x0
-#define ISCHARGE_CHRG             0x1
-#define ISCHARGE_NOCHRG           0x2
-#define ISCHARGE_COMPLETE         0x3
+#define CONFIG_TIME_CHANNEL_NUM         4   /**< Maximum timer channel. */
 
-#define BATT_VOLUME_CALIBRATING_DURATION 5000   /* Volume calibrating duration, in ms. */
-#define BATT_VOLUME_UPDATE_DURATION      30000  /* Volume updating duration, in ms. */
+/**
+ @brief Timer functions wrapper.
+ */
+#define tim_oc_init(tim, ch, oc)                      \
+    if (ch > 0 && ch <= CONFIG_TIME_CHANNEL_NUM) {    \
+        g_tim_func[ch-1].oc_init(tim, oc);            \
+    }
 
-// the voltage scale factor to transform the voltage on the ADC pin to the actual battery voltage
-// it is controlled by the resistor network, please refer to the ref design schematic for details
-#define BATTERY_VOLTAGE_FULL    ((int)(11.2 * 1000)) //mV
-#define BATTERY_VOLTAGE_EMPTY   ((int)(7.2 * 1000)) //mV
+#define tim_oc_preloadcfg(tim, ch, preload)           \
+    if (ch > 0 && ch <= CONFIG_TIME_CHANNEL_NUM) {    \
+        g_tim_func[ch-1].oc_preloadcfg(tim, preload); \
+    }
 
-void init_battery(void);
-_u32 get_electricity(void);
-_u8 get_electricitypercentage(void);
-_u8 charge_detect_getstatus(void);
-_s8 get_dc_charge_status(void);
-_s8 get_home_charge_status(void);
-void heartbeat_battery(void);
+#define tim_set_compare(tim, ch, duty)                \
+    if (ch > 0 && ch <= CONFIG_TIME_CHANNEL_NUM) {    \
+        g_tim_func[ch-1].set_compare(tim, duty);      \
+    }
 
+#endif

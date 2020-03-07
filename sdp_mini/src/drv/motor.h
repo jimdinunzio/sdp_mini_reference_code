@@ -30,39 +30,110 @@
 
 #pragma once
 
-//左右行走电机管脚定义
-#define MOTO_GPIO       GPIOD
-#define MOTO_LF_EN      GPIO_Pin_4
-#define MOTO_LB_EN      GPIO_Pin_9
+#define CONFIG_MOTOR_ENCODER_NUM        2
 
-#define MOTO_L_PWM_ID   1
-#define MOTO_L_PWM_CHN  4
-#define MOTO_L_PWM      (GET_TIM(MOTO_L_PWM_ID))
+#define CONFIG_MOTOR_ENCODER_FILTER     1
+#define MOTOR_ENCODER_FILTER_INTERVAL   100     /**< Encoder filter interval in us. */
 
-#define MOTO_RF_EN      GPIO_Pin_6
-#define MOTO_RB_EN      GPIO_Pin_7
+#define CONFIG_MOTOR_PWM_PERIOD         (5000)
 
-#define MOTO_R_PWM_CHN  3
-#define MOTO_R_PWM_ID   1
-#define MOTO_R_PWM      (GET_TIM(MOTO_R_PWM_ID))
+/**
+ @brief Global motor enable port.
+ */
+#define MOTO_EN_PORT                GPIOB
+#define MOTO_EN_PIN                 GPIO_Pin_15  /**< PB15 is motor enable. */
 
-#define MOTO_L_PWM_GPIO_PORT  GPIOE
-#define MOTO_L_PWM_GPIO_PIN   GPIO_Pin_14
+/**
+ @brief Left walking motor hardware configurations.
+ */
+#define MOTO_LF_PWM_PORT            GPIOE       /** PE13 is left forward motor pwm. */
+#define MOTO_LF_PWM_PIN             GPIO_Pin_13
 
-#define MOTO_R_PWM_GPIO_PORT  GPIOE
-#define MOTO_R_PWM_GPIO_PIN   GPIO_Pin_13
+#define MOTO_LF_PWM_ID              1           /**< PE13 is TIM1_CH4 */
+#define MOTO_LF_PWM_CHN             3
+#define MOTO_LF_PWM                 (GET_TIM(MOTO_LF_PWM_ID))
+
+#define MOTO_LB_PWM_PORT            GPIOE       /** PE14 is left forward motor pwm. */
+#define MOTO_LB_PWM_PIN             GPIO_Pin_14
+
+#define MOTO_LB_PWM_ID              1           /**< PE14 is TIM1_CH3 */
+#define MOTO_LB_PWM_CHN             4
+#define MOTO_LB_PWM                 (GET_TIM(MOTO_LB_PWM_ID))
+
+#define MOTO_LI_MONI_PORT           GPIOD       /**< PD5 is left motor overcurrent monitor. */
+#define MOTO_LI_MONI_PIN            GPIO_Pin_5
+
+/**
+ @brief Right walking motor hardware configurations.
+ */
+#define MOTO_RF_PWM_PORT            GPIOB       /** PB9 is right motor pwm. */
+#define MOTO_RF_PWM_PIN             GPIO_Pin_9
+
+#define MOTO_RF_PWM_ID              4
+#define MOTO_RF_PWM_CHN             4           /**< PB9 is TIM4_CH4 */
+#define MOTO_RF_PWM                 (GET_TIM(MOTO_RF_PWM_ID))
+
+#define MOTO_RB_PWM_PORT            GPIOB       /** PB8 is right motor pwm. */
+#define MOTO_RB_PWM_PIN             GPIO_Pin_8
+
+#define MOTO_RB_PWM_ID              4
+#define MOTO_RB_PWM_CHN             3           /**< PB8 is TIM4_CH3 */
+#define MOTO_RB_PWM                 (GET_TIM(MOTO_RB_PWM_ID))
+
+#define MOTO_RI_MONI_PORT           GPIOC       /**< PC5 is right motor overcurrent monitor. */
+#define MOTO_RI_MONI_PIN            GPIO_Pin_5
+
+/**
+ @brief Encoder configure.
+ */
+#define ENCODER_L1_PORT             GPIOD
+#define ENCODER_L1_PIN              GPIO_Pin_6
+#define ENCODER_L1_EXTI             6
+
+#define ENCODER_L2_PORT             GPIOD
+#define ENCODER_L2_PIN              GPIO_Pin_4
+#define ENCODER_L2_EXTI             4
+
+#define ENCODER_R1_PORT             GPIOD
+#define ENCODER_R1_PIN              GPIO_Pin_2
+#define ENCODER_R1_EXTI             2
+
+#define ENCODER_R2_PORT             GPIOD
+#define ENCODER_R2_PIN              GPIO_Pin_3
+#define ENCODER_R2_EXTI             3
+
+/**< This value is calibrate by actual test. */
+#if defined(CONFIG_MOTOR_ENCODER_NUM) && (CONFIG_MOTOR_ENCODER_NUM == 2)
+#define ODOMETER_EST_PULSE_PER_METER  (13500UL*4/5)
+#else
+#define ODOMETER_EST_PULSE_PER_METER  6750UL
+#endif
+
+/**
+ @brief motor driving port configure.
+ */
+typedef struct _motor_cfg {
+    pwm_port_t  fw_pwm;         /**< Forward control pwm port. */
+    pwm_port_t  bk_pwm;         /**< Backward control pwm port. */
+    in_port_t   oc_mon;         /**< Over-current monitoring port. */
+    exti_port_t encoder[CONFIG_MOTOR_ENCODER_NUM]; /**< Motor encoder odometer port. */
+    _u16        speed_factor;   /**< Odometer speed factor, in pulse per meter. */
+} motor_cfg_t;
+
+/**
+ @brief motor encoder filter.
+ */
+typedef struct _encoder_filter {
+    _u32 ts;                    /**< Encoder trigger timestamp in us. */
+    _u32 level;                 /**< Encoder trigger level. */
+    _u16 err;                   /**< Enocder error count. */
+} encoder_filter_t;
 
 //边刷电机管脚定义
 #define BRUSH_L_GPIO     GPIOC
 #define BRUSH_L_PIN      GPIO_Pin_8
 #define BRUSH_R_GPIO     GPIOB
 #define BRUSH_R_PIN      GPIO_Pin_0
-
-//每米编码器脉冲数
-#define ODOMETER_EST_PULSE_PER_METER  6390UL
-#define ODOMETER_GPIO       GPIOD
-#define ODOMETER_LEFT       GPIO_Pin_3
-#define ODOMETER_RIGHT      GPIO_Pin_2
 
 //落地检测相关
 #define ONGROUND_GPIO       GPIOD
@@ -73,12 +144,25 @@
 #define CONF_MOTOR_HEARTBEAT_FREQ     60
 #define CONF_MOTOR_HEARTBEAT_DURATION (1000/(CONF_MOTOR_HEARTBEAT_FREQ))
 
+#define CONF_MOTOR_STALL_STABLE_DURATION    100
+#define CONF_MOTOR_STALL_BLINDMODE_DURATION 600
+#define CONF_MOTOR_STALL_PWM_THRESHOLD      (CONFIG_MOTOR_PWM_PERIOD*8/10)
+
+#define CONF_MOTOR_SPEED_STALL_DURATION     1000
+
 enum motorCtrlState_t {
     MOTOR_CTRL_STATE_RELEASE = 0,
     MOTOR_CTRL_STATE_FORWARD = 1,
     MOTOR_CTRL_STATE_BACKWARD = 2,
     MOTOR_CTRL_STATE_BRAKE = 3,
 };
+
+typedef enum speed_monitor {
+    MOTOR_SPEED_MONI_NONE,  /**< No motor speed stall monitor. */
+    MOTOR_SPEED_MONI_BUMP,  /**< Motor speed stall mapping as bump action. */
+    MOTOR_SPEED_MONI_STALL, /**< Motor speed stall mapping as stall action. */
+} speed_monitor_t;
+
 
 void init_walkingmotor(void);
 void set_walkingmotor_lduty(_s32 lDuty, _s32 ctrl);
@@ -102,3 +186,10 @@ _u8 is_ontheground(void);
 void init_brushmotor(void);
 void speedctl_heartbeat(void);
 
+void stalldetector_init(void);
+_u8 stalldetector_is_bumped(void);
+_u8 stalldetector_is_stalled(void);
+void stalldetector_heartbeat(void);
+void stalldetector_enterBlindMode(_u8 id);
+
+#define init_stalldetector      stalldetector_init

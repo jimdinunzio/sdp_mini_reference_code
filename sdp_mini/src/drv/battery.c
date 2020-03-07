@@ -36,6 +36,7 @@
 #define CONFIG_POWERSTATE_CHECK_DURATION       10       //单位：ms
 #define CONFIG_CHARGEBASE_REMOVAL_THRESHOLDTS  100      //单位：ms
 static _u32 batteryFrequency = 0;
+static _u32 batteryElectricityCalibrate = 0;
 static _u32 batteryElectricityPercentage = 0;
 static _u8 chargeSound = 2;
 static _u8 isChargeInserted = 0;
@@ -60,9 +61,6 @@ static void _battery_sample_batteryvoltage();
  */
 static void init_electricity_detect(void)
 {
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO|RCC_APB2Periph_ADC1, ENABLE);
-    pinMode(BATT_VOLT_ADC_PORT, BATT_VOLT_ADC_PIN, GPIO_Mode_AIN, GPIO_Speed_10MHz);
-
     _pwrAdcSampleState = BATTERY_ADC_STATE_IDLE;
     _pwrFilterPos = 0;
     // preheat the adc avg-filter queue...
@@ -78,8 +76,8 @@ _u32 get_electricity(void)
 {
     const _u32  ADC_LEVELS = (0x1<<ADC_RES_BIT); //4096
   //  ADC_REF = 2.495
-  //  VBATT / BATTERY_VOLTAGE_SCALEFACTOR = adc_val * ADC_REF / 4096
-  const float ADC_TO_BATT_VOLT_FACTOR = (ADC_REF_VOLT * 1000 * BATTERY_VOLTAGE_SCALEFACTOR) / ADC_LEVELS;
+  //  VBATT / BATT_DETECT_ADC_RATIO = adc_val * ADC_REF / 4096
+  const float ADC_TO_BATT_VOLT_FACTOR = (BATT_DETECT_ADC_REF * BATT_DETECT_ADC_RATIO) / ADC_LEVELS;
   const _u32  ADC_TO_BATT_VOLT_FACTOR_fixQ10 = (_u32)(ADC_TO_BATT_VOLT_FACTOR * 1024.0);
   return (_pwrCachedBattVoltADCVal * ADC_TO_BATT_VOLT_FACTOR_fixQ10)>>10;
 }
@@ -97,17 +95,26 @@ _u8 get_electricitypercentage(void)
 static void init_charge_detect(void)
 {
     GPIO_InitTypeDef GPIO_InitStructure;
+
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOE, ENABLE);
-    GPIO_InitStructure.GPIO_Pin = BATT_FAULT | BATT_CHRG | BATT_TOC | BATT_READY;
+
+    GPIO_InitStructure.GPIO_Pin   = BATT_FAULT | BATT_CHRG | BATT_READY;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_10MHz;
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
+    GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_IPU;
     GPIO_Init(GPIOE, &GPIO_InitStructure);
 
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
-    GPIO_InitStructure.GPIO_Pin = HOCHARGE_DETECT | DCCHARGE_DETECT;
+
+    GPIO_InitStructure.GPIO_Pin   = HOCHARGE_DETECT | DCCHARGE_DETECT;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_10MHz;
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPD;
+    GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_IN_FLOATING;
     GPIO_Init(GPIOB, &GPIO_InitStructure);
+
+    GPIO_InitStructure.GPIO_Pin   = BATT_DETECT_PIN;
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_10MHz;
+    GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_AIN;
+    GPIO_Init(BATT_DETECT_PORT, &GPIO_InitStructure);
 }
 /*
  * 电池充电状态检测函数
@@ -147,17 +154,58 @@ static void _battery_sample_batteryvoltage()
 {
     switch (_pwrAdcSampleState) {
     case BATTERY_ADC_STATE_IDLE:
-        adc_read_start(GET_ADC(BATT_VOLT_ADC), BATT_VOLT_ADC_CHANNEL);
+        adc_read_start(GET_ADC(BATT_DETECT_ADC), BATT_DETECT_ADC_CHN);
         _pwrAdcSampleState = BATTERY_ADC_STATE_WAITING;
         break;
     case BATTERY_ADC_STATE_WAITING:
-        if (adc_read_is_ready(GET_ADC(BATT_VOLT_ADC))) {
-            _on_battery_adc_data_ready(adc_read_final(GET_ADC(BATT_VOLT_ADC)));
+        if (adc_read_is_ready(GET_ADC(BATT_DETECT_ADC))) {
+            _on_battery_adc_data_ready(adc_read_final(GET_ADC(BATT_DETECT_ADC)));
             _pwrAdcSampleState = BATTERY_ADC_STATE_IDLE;
         }
         break;
     }
 }
+static _s32 _battery_volume_calculate(void)
+{
+    _s32 percent;
+    _u32 currentVolt = get_electricity();
+
+    if (currentVolt < BATTERY_VOLTAGE_EMPTY) {
+        percent = 0;
+    }   else if (currentVolt > BATTERY_VOLTAGE_FULL) {
+        percent = 100;
+    } else {
+        percent = (currentVolt - BATTERY_VOLTAGE_EMPTY) * 100 / (BATTERY_VOLTAGE_FULL - BATTERY_VOLTAGE_EMPTY);
+    }
+    return percent;
+}
+
+static void _battery_volume_update(void)
+{
+    _s32 percent = _battery_volume_calculate();
+
+    if (ISCHARGE_CHRG != charge_detect_getstatus()) {
+        /* Discharging. Volume is always getting down. */
+        if (percent >= batteryElectricityPercentage) {
+            return ;
+        }
+        percent = batteryElectricityPercentage - 1;
+    } else {
+        /* Charging. Volume is always getting up. */
+        if (percent <= batteryElectricityPercentage) {
+            return ;
+        }
+        percent = batteryElectricityPercentage + 1;
+    }
+
+    if (percent < 0) {
+        percent = 0;
+    } else if (percent > 100) {
+        percent = 100;
+    }
+    batteryElectricityPercentage = percent;
+}
+
 /*
  * 电池相关初始化函数
  * 初始化电池容量检测
@@ -174,21 +222,28 @@ void init_battery(void)
  */
 void heartbeat_battery(void)
 {
+    if (!batteryElectricityCalibrate) {
+        _battery_sample_batteryvoltage();
+
+        if ((getms() - batteryFrequency) >= BATT_VOLUME_CALIBRATING_DURATION) {
+            batteryElectricityPercentage = _battery_volume_calculate();
+            batteryElectricityCalibrate = true;
+            batteryFrequency = getms();
+            DBG_OUT("Battery calibration done, voltage %d, volume %d.\r\n",
+                    get_electricity(), batteryElectricityPercentage);
+        }
+        return ;
+    }
+
     _battery_sample_batteryvoltage();
-    if ((getms() - batteryFrequency) >= 3000) {
+    if ((getms() - batteryFrequency) >= BATT_VOLUME_UPDATE_DURATION) {
         //3秒检测一次电池容量及计算百分比
         batteryFrequency = getms();
 
-        _u32 currentVolt = get_electricity();
-        if (currentVolt < BATTERY_VOLTAGE_EMPTY) {
-            batteryElectricityPercentage = 0;
-        } else if (currentVolt > BATTERY_VOLTAGE_FULL) {
-            batteryElectricityPercentage = 100;
-        } else {
-            batteryElectricityPercentage = (currentVolt - BATTERY_VOLTAGE_EMPTY)*100 / (BATTERY_VOLTAGE_FULL - BATTERY_VOLTAGE_EMPTY);
-        }
+        //检测电池容量及计算百分比
+        _battery_volume_update();
+        DBG_OUT("Battery voltage %d%%, %dmv.\r\n", batteryElectricityPercentage, get_electricity());
 
-        DBG_OUT("Battery voltage %d%%, %dmv\r\n", batteryElectricityPercentage, currentVolt);
 
         if (batteryElectricityPercentage < 15 && ISCHARGE_CHRG != charge_detect_getstatus()) {
             {
@@ -202,12 +257,13 @@ void heartbeat_battery(void)
             chargeSound = 2;
         }
     }
+#if 0
     if (isChargeInserted) {
         //是否处在充电桩充电状态
         if (!PIN_READ(GPIOB, HOCHARGE_DETECT)) {
             //在充电桩充电下：检测是否脱离充电桩，拔出则更改充电桩充电状态
             if (getms() - chargeInsertedTs >= CONFIG_CHARGEBASE_REMOVAL_THRESHOLDTS) {
-//                beep_beeper(5000, 80, 2);
+                beep_beeper(5000, 80, 2);
                 isChargeInserted = 0;
             }
         } else {
@@ -218,7 +274,7 @@ void heartbeat_battery(void)
         //不在充电桩充电下：检测是否脱离充电桩，插入则更改充电桩充电状态
         if (PIN_READ(GPIOB, HOCHARGE_DETECT)) {
             isChargeInserted = 1;
-//            beep_beeper(5000, 80, 2);
+            beep_beeper(5000, 80, 2);
             chargeInsertedTs = getms();
         }
 
@@ -242,4 +298,5 @@ void heartbeat_battery(void)
             dcInsertedTs = getms();
         }
     }
+#endif
 }

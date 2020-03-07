@@ -57,6 +57,9 @@
 #define CONFIG_SONAR_CHANNEL_NUM        4       /**< Sonar channel number. */
 #define CONFIG_SONAR_SAMPLE_SIZE        4       /**< Sonar sample buffer size. */
 #define CONFIG_SONAR_TIMEOUT_MS         50      /**< Sonar detection timeout in ms. */
+#define CONFIG_SONAR_TICKS              100     /**< Sonar detection timeout in ms. */
+
+#define CONFIG_SONAR_BLOCK_DIST         100     /**< Sonar block distance in mm. */
 
 //#define CONFIG_SONAR_DISTANCE_Q16       1     /**< Q16 formatted distance. */
 

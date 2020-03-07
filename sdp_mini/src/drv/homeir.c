@@ -31,6 +31,7 @@
 #include "common/common.h"
 #include "homeir.h"
 #include "irdecoder.h"
+#include "drv/exti.h"
 
 #define TOWERID_MAIN_BEACON      0
 #define TOWERID_LEFT_BEACON      1
@@ -80,48 +81,74 @@ static _u8 _dumpPos;
 
 static void _on_beacon_decode_ready (irdecoder_context_t * context, _u32 data, _u32 ts);
 
+
+static void _on_signal_swap(int id, int currentLvl)
+{
+#ifdef _IR_TOWER_RAW_DEBUG    
+    if (id == 0) {
+        if (_dumpState == 0) {
+            if (_dumpPos == 0) {
+                _dumpInitial = currentLvl;
+            }
+            _dumpBits[_dumpPos] = currentLvl?1:0;
+            _dumpBuffer[_dumpPos++] = getus();
+            
+            if (_dumpPos == _countof(_dumpBuffer)) {
+                _dumpPos = 0;
+                _dumpState = 1;
+            }
+        }
+    }
+#endif
+    
+    irdecoder_on_signal(&decoder_ctx[id], currentLvl?0:1); //received signal level is inversed
+}
+
+void drv_towerlocator1_exti(void)
+{
+    _on_signal_swap(TOWERID_MAIN_PROBE, PIN_READ(IR_SENSOR_TOWER1_PORT, IR_SENSOR_TOWER1_PIN));
+}
+
+void drv_towerlocator2_exti(void)
+{
+    _on_signal_swap(TOWERID_LEFT_PROBE, PIN_READ(IR_SENSOR_TOWER2_PORT, IR_SENSOR_TOWER2_PIN));
+}
+
+void drv_towerlocator3_exti(void)
+{
+    _on_signal_swap(TOWERID_RIGHT_PROBE, PIN_READ(IR_SENSOR_TOWER3_PORT, IR_SENSOR_TOWER3_PIN));
+}
+
 int drv_towerlocator_init(void)
 {
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);                          //外部中断，需要使能AFIO时钟
-
     GPIO_InitTypeDef GPIO_InitStructure;
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOD, ENABLE);                         //使能PORTA,PORTC时钟
-    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-    GPIO_InitStructure.GPIO_Pin  = GPIO_Pin_12 | GPIO_Pin_13 | GPIO_Pin_14;//P
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;                                 
 
-    GPIO_Init(GPIOD, &GPIO_InitStructure);
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);                          //外部中断，需要使能AFIO时钟
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOD, ENABLE);                         //使能PORTA,PORTC时钟
+
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_InitStructure.GPIO_Pin   = IR_SENSOR_TOWER1_PIN;
+    GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_IPU;
+    GPIO_Init(IR_SENSOR_TOWER1_PORT, &GPIO_InitStructure);
     
-    EXTI_InitTypeDef EXTI_InitStructure;
-    
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_InitStructure.GPIO_Pin   = IR_SENSOR_TOWER2_PIN;
+    GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_IPU;
+    GPIO_Init(IR_SENSOR_TOWER2_PORT, &GPIO_InitStructure);
+
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_InitStructure.GPIO_Pin   =  IR_SENSOR_TOWER3_PIN;
+    GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_IPU;
+    GPIO_Init(IR_SENSOR_TOWER3_PORT, &GPIO_InitStructure);
+
     GPIO_EXTILineConfig(IR_SENSOR_TOWER_INT_PORT, GET_EXTINT_PIN(IR_SENSOR_TOWER1_INTLINE));
     GPIO_EXTILineConfig(IR_SENSOR_TOWER_INT_PORT, GET_EXTINT_PIN(IR_SENSOR_TOWER2_INTLINE));
     GPIO_EXTILineConfig(IR_SENSOR_TOWER_INT_PORT, GET_EXTINT_PIN(IR_SENSOR_TOWER3_INTLINE));
-    
-    // Configure EXTI lines
-    EXTI_InitStructure.EXTI_Mode = EXTI_Mode_Interrupt;
-    // for precision, EXTI_Trigger_Rising_Falling can be used. But it brings more
-    //  overheads
-    EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Rising_Falling;  
-    EXTI_InitStructure.EXTI_LineCmd = ENABLE;
-    
-    EXTI_InitStructure.EXTI_Line = GET_EXTINT_LINE(IR_SENSOR_TOWER1_INTLINE);
-    EXTI_Init(&EXTI_InitStructure);
-    
-    EXTI_InitStructure.EXTI_Line = GET_EXTINT_LINE(IR_SENSOR_TOWER2_INTLINE);
-    EXTI_Init(&EXTI_InitStructure);
-    
-    EXTI_InitStructure.EXTI_Line = GET_EXTINT_LINE(IR_SENSOR_TOWER3_INTLINE);
-    EXTI_Init(&EXTI_InitStructure);   
-    
-    NVIC_InitTypeDef NVIC_InitStructure;
-    NVIC_InitStructure.NVIC_IRQChannel = IR_SENSOR_TOWER_IRQn;
-    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
-    NVIC_InitStructure.NVIC_IRQChannelSubPriority = 3;
-    NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
-    NVIC_Init(&NVIC_InitStructure);  
-  
-    
+
+    exti_reg_callback(IR_SENSOR_TOWER1_INTLINE, EXTI_Trigger_Rising_Falling, drv_towerlocator1_exti);
+    exti_reg_callback(IR_SENSOR_TOWER2_INTLINE, EXTI_Trigger_Rising_Falling, drv_towerlocator2_exti);
+    exti_reg_callback(IR_SENSOR_TOWER3_INTLINE, EXTI_Trigger_Rising_Falling, drv_towerlocator3_exti);
+
     memset(beacon_cache, 0, sizeof(beacon_cache));
            
     for (size_t pos = 0; pos < _countof(decoder_ctx); ++pos)
@@ -229,56 +256,6 @@ _u32 drv_towerlocator_get_beacon_timestamp(int id, int beacon)
     }
     return 0;
 }
-
-static void _on_signal_swap(int id, int currentLvl)
-{
-#ifdef _IR_TOWER_RAW_DEBUG    
-    if (id == 0) {
-        if (_dumpState == 0) {
-            if (_dumpPos == 0) {
-                _dumpInitial = currentLvl;
-            }
-            _dumpBits[_dumpPos] = currentLvl?1:0;
-            _dumpBuffer[_dumpPos++] = getus();
-            
-            if (_dumpPos == _countof(_dumpBuffer)) {
-                _dumpPos = 0;
-                _dumpState = 1;
-            }
-        }
-    }
-#endif
-    
-    irdecoder_on_signal(&decoder_ctx[id], currentLvl?0:1); //received signal level is inversed
-}
-
-// interrupt handler
-
-#if IR_SENSOR_TOWER_IRQn!=EXTI15_10_IRQn
-#error "IR_SENSOR_TOWER_IRQn!=EXTI15_10_IRQn"
-#endif
-
-
-void EXTI15_10_IRQHandler(void)
-{
-    //check which pin has signaled the interrupt
-    
-    if (EXTI_GetITStatus(GET_EXTINT_LINE(IR_SENSOR_TOWER1_INTLINE))!= RESET) {
-        EXTI_ClearITPendingBit(GET_EXTINT_LINE(IR_SENSOR_TOWER1_INTLINE));
-        _on_signal_swap(TOWERID_MAIN_PROBE, PIN_READ(IR_SENSOR_TOWER1_PORT, IR_SENSOR_TOWER1_PIN));
-    }
-    
-    if (EXTI_GetITStatus(GET_EXTINT_LINE(IR_SENSOR_TOWER2_INTLINE))!= RESET) {
-        EXTI_ClearITPendingBit(GET_EXTINT_LINE(IR_SENSOR_TOWER2_INTLINE));
-        _on_signal_swap(TOWERID_LEFT_PROBE, PIN_READ(IR_SENSOR_TOWER2_PORT, IR_SENSOR_TOWER2_PIN));
-    }
-
-    if (EXTI_GetITStatus(GET_EXTINT_LINE(IR_SENSOR_TOWER3_INTLINE))!= RESET) {
-        EXTI_ClearITPendingBit(GET_EXTINT_LINE(IR_SENSOR_TOWER3_INTLINE));
-        _on_signal_swap(TOWERID_RIGHT_PROBE, PIN_READ(IR_SENSOR_TOWER3_PORT, IR_SENSOR_TOWER3_PIN));
-    }    
-}
-
 
 static void _on_beacon_decode_ready (irdecoder_context_t * context, _u32 data, _u32 ts)
 {   

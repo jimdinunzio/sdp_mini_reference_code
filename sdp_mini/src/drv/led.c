@@ -162,26 +162,29 @@ static int led_r, led_g, led_b;
    |_____________________|
         >= 24us
  */
-static void drv_led_bit(uint8_t bit)
-{
-    if (bit) {
-        PIN_SET(LED_COLOR_PORT, LED_COLOR_PIN, 1);
-        delay_250ns();
-        delay_250ns();
-        delay_250ns();
-        delay_250ns();
-        PIN_SET(LED_COLOR_PORT, LED_COLOR_PIN, 0);
-        delay_250ns();
-    } else {
-        PIN_SET(LED_COLOR_PORT, LED_COLOR_PIN, 1);
-        delay_250ns();
-        PIN_SET(LED_COLOR_PORT, LED_COLOR_PIN, 0);
-        delay_250ns();
-        delay_250ns();
-        delay_250ns();
-        delay_250ns();
-    }
-}
+#define drv_led_bit(bit)    do {    \
+    if (bit) {  \
+        PIN_SET(LED_COLOR_PORT, LED_COLOR_PIN, 1);  \
+        delay_250ns();  \
+        delay_250ns();  \
+        delay_250ns();  \
+        delay_250ns();  \
+        delay_250ns();  \
+        delay_250ns();  \
+        PIN_SET(LED_COLOR_PORT, LED_COLOR_PIN, 0);  \
+        delay_250ns();  \
+    } else {    \
+        PIN_SET(LED_COLOR_PORT, LED_COLOR_PIN, 1);  \
+        delay_250ns();  \
+        PIN_SET(LED_COLOR_PORT, LED_COLOR_PIN, 0);  \
+        delay_250ns();  \
+        delay_250ns();  \
+        delay_250ns();  \
+        delay_250ns();  \
+        delay_250ns();  \
+        delay_250ns();  \
+    }   \
+} while (0)
 
 /**
  @brief Color led byte command send.
@@ -190,11 +193,14 @@ static void drv_led_bit(uint8_t bit)
  */
 static void drv_led_cmd(uint8_t cmd)
 {
-    int8_t i;
-
-    for (i = 7; i >= 0; i--) {
-        drv_led_bit(cmd & (1<<i));
-    }
+    drv_led_bit(cmd & 0x80);
+    drv_led_bit(cmd & 0x40);
+    drv_led_bit(cmd & 0x20);
+    drv_led_bit(cmd & 0x10);
+    drv_led_bit(cmd & 0x08);
+    drv_led_bit(cmd & 0x04);
+    drv_led_bit(cmd & 0x02);
+    drv_led_bit(cmd & 0x01);
 }
 
 /**
@@ -219,6 +225,9 @@ static void drv_led_reset(void)
 void drv_led_set(int r, int g, int b)
 {
     uint8_t reset = false;
+    r *= 0x10;
+    g *= 0x10;
+    b *= 0x10;
 
     if (r < 0 || r > 0xFF) {
         return ;
@@ -263,8 +272,13 @@ void drv_led_set(int r, int g, int b)
  */
 void drv_led_init(void)
 {
+#if defined(CONFIG_BREAKOUT_REV) && (CONFIG_BREAKOUT_REV >= 5)
+    pinMode(LED_COLOR_PORT, LED_COLOR_PIN, GPIO_Mode_Out_OD, GPIO_Speed_50MHz);
+#else
     pinMode(LED_COLOR_PORT, LED_COLOR_PIN, GPIO_Mode_Out_PP, GPIO_Speed_50MHz);
+#endif
     PIN_SET(LED_COLOR_PORT, LED_COLOR_PIN, 0);
+    _delay_us(100);
 
     led_r = led_g = led_b = -1;
     drv_led_set(0, 0, 0);

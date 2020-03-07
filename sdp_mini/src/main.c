@@ -41,13 +41,13 @@
  *    PA5                                  PB5    BUMP_DETECT_L(GPIO)        PC5     MOTO_RI_MONITOR(GPIO)         PD5    MOTO_LI_MONITOR(GPIO)   PE5     SONAR_ECHO1(GPIO)      
  *    PA6     BATT_DETECT(ADC12_IN6)       PB6                               PC6                                   PD6    MOTO_RF_EN(GPIO)        PE6     
  *    PA7                                  PB7                               PC7     BOTTOM_IR_E(BASIC TIMER)      PD7    MOTO_RB_EN(GPIO)        PE7     SONAR_ECHO2
- *    PA8                                  PB8    HOCHARGE_DETECT(GPIO)      PC8                                   PD8                            PE8     SONAR_ECHO3
- *    PA9     PCIE_CRX(USART1_TX)          PB9    DCCHARGE_DETECT(GPIO)      PC9     PCIE_nCCMD(GPIO)              PD9    MOTO_LB_EN(GPIO)        PE9     SONAR_ECHO4
+ *    PA8                                  PB8    MOTO_RB_PWM(TIM4_CH3)      PC8                                   PD8                            PE8     SONAR_ECHO3
+ *    PA9     PCIE_CRX(USART1_TX)          PB9    MOTO_RF_PWM(TIM4_CH4)      PC9     PCIE_nCCMD(GPIO)              PD9    MOTO_LB_EN(GPIO)        PE9     SONAR_ECHO4
  *    PA10    PCIE_CTX(USART1_RX)          PB10                              PC10    PC10_TX(USART3_TX)            PD10   GROUND_DETECT_R(GPIO)   PE10    SONAR_TRIG1
  *    PA11                                 PB11                              PC11    PC11_RX(USART3_RX)            PD11                           PE11    SONAR_TRIG2
  *    PA12    PCIE_CBUSY(GPIO)             PB12   LED_WS2812(GPIO)           PC12                                  PD12   HOME_IR_R1(TIM4_CH1)    PE12    SONAR_TRIG3
- *    PA13    PROGRAMMER(SWDIO)            PB13   BUMP_DETECT_R(GPIO)        PC13                                  PD13   HOME_IR_R2(TIM4_CH2)    PE13    MOTO_R_PWM(TIM1_CH3)
- *    PA14    PROGRAMMER(SWCLK)            PB14                              PC14                                  PD14   HOME_IR_R3(TIM4_CH3)    PE14    MOTO_L_PWM(TIM1_CH4)
+ *    PA13    PROGRAMMER(SWDIO)            PB13   BUMP_DETECT_R(GPIO)        PC13                                  PD13   HOME_IR_R2(TIM4_CH2)    PE13    MOTO_LF_PWM(TIM1_CH3)
+ *    PA14    PROGRAMMER(SWCLK)            PB14                              PC14                                  PD14   HOME_IR_R3(TIM4_CH3)    PE14    MOTO_LB_PWM(TIM1_CH4)
  *    PA15    BEEP_PWM(TIM2_CH1_ETR)       PB15   CURRENT_SET(GPIO)          PC15                                  PD15                           PE15    SONAR_TRIG4
  *
  * Change since PCB REV 1.0
@@ -72,22 +72,8 @@
 #include "drv/sonar.h"
 #include "drv/led.h"
 #include "drv/drv_ctrlbus.h"
-#include "drv/health_monitor.h"
+#include "drv/wifi_monitor.h"
 #include "bump_monitor.h"
-/*
- * 低电量报警health monitor回调函数
- */
-static _u8 battery_low_cb(void)
-{
-    _u8 percent = get_electricitypercentage();
-
-    if (percent < 10) {
-        return (SLAMWARECORECB_HEALTH_FLAG_ERROR);
-    } else if (percent < 30) {
-        return (SLAMWARECORECB_HEALTH_FLAG_WARN);
-    }
-    return (SLAMWARECORECB_HEALTH_FLAG_OK);
-}
 /*
 * 初始化板级外设函数
 */
@@ -113,27 +99,38 @@ static _s32 init_dev(void)
     init_ontheground_detect();                                          //初始化是否在地上的检测脚，用于判断本机时候在地上还是架空
     init_bump_detect();                                                 //初始化碰撞检测脚
     init_bumpermonitor();
+    init_stalldetector();
 #if defined(CONFIG_BREAKOUT_REV) && (CONFIG_BREAKOUT_REV >= 3)
     init_sonar();
 #endif
-    health_monitor_init();
-
-    /* 注册低电量报警回调函数。 */
-    health_monitor_register(BASE_POWER_LOW(NONE),
-                            "Low battery.",
-                            battery_low_cb);
+    init_wifi_monitor();
     return 1;
 }
 
+extern _u8 sdp_status;
 _u32 shutdownHeartbeatFrequency = 0;
 /*
  * 与slamcore连接保持判定函数
  */
 void shutdown_heartbeat(void)
 {
+    if ((sdp_status == SdpStatusStartingUp)
+     || (sdp_status == SdpStatusUpgradingFirmware)) {
+        return ;
+    }
     if ((getms() - shutdownHeartbeatFrequency) > 1000)
     {
+        shutdownHeartbeatFrequency = getms();
         set_walkingmotor_speed(0, 0);                           //与slamcore断开连接则停止行走
+        sdp_status = SdpStatusCoreDisconnected;
+    }
+}
+void shutdown_ticks_update(void)
+{
+    shutdownHeartbeatFrequency = getms();
+    if (sdp_status == SdpStatusStartingUp || sdp_status == SdpStatusCoreDisconnected) {
+        /* Switch status to idle when core is re-connected. */
+        sdp_status = SdpStatusIdle;
     }
 }
 /*
@@ -164,7 +161,7 @@ static void dev_heartbeat(void)
 #endif
     shutdown_heartbeat();
     speedctl_heartbeat();
-    health_monitor_heartbeat();
+    stalldetector_heartbeat();
 }
 /*
  * 故障模式处理函数
@@ -176,19 +173,93 @@ static void on_abort_mode(void)                                 //故障模式�
     while (1);
 }
 
+static _u32 _led_ticks = 0;
+static _u8  _led_status = 0;
+
+/*
+ * 指示灯心跳函数
+ */
+static void led_heartbeat(void)
+{
+    _u8  n;
+
+    n = get_electricitypercentage();
+    if (n < 15) {
+        if (getms() - _led_ticks < 250) {
+            return ;
+        }
+        /* Blink red led when battery is less than 15%. */
+        drv_led_set(_led_status, 0, 0);
+        _led_status = _led_status ? 0 : 1;
+        _led_ticks = getms();
+        return ;
+    } else if (n < 30) {
+        if (getms() - _led_ticks < 250) {
+            return ;
+        }
+        /* Blink yellow led when battery is less than 30%. */
+        drv_led_set(_led_status, _led_status, 0);
+        _led_status = _led_status ? 0 : 1;
+        _led_ticks = getms();
+        return ;
+    }
+
+    switch (sdp_status) {
+    case SdpStatusStartingUp:
+    case SdpStatusCoreDisconnected:
+        /* Blink cyan led when starting up. */
+        if (getms() - _led_ticks < 250) {
+            return ;
+        }
+        drv_led_set(0, _led_status, _led_status);
+        _led_status = _led_status ? 0 : 1;
+        _led_ticks = getms();
+        break;
+    case SdpStatusIdle:
+        if (stalldetector_is_stalled()) {
+            drv_led_set(1, 0, 0);
+        } else {
+            drv_led_set(0, 1, 1);
+        }
+        break;
+    case SdpStatusStartSweep:
+        if (getms() - _led_ticks < 100) {
+            return ;
+        }
+        _led_ticks = getms();
+        if (stalldetector_is_stalled()) {
+            drv_led_set(1, 0, 0);
+            return ;
+        }
+        /* Color led rolling. */
+        drv_led_set((_led_status>>2)&0x01, (_led_status>>1)&0x01, _led_status&0x01);
+        _led_status >>= 1;
+        if (_led_status == 0) {
+            _led_status = (1 << 2);
+        }
+        break;
+    default:
+        break;
+    }
+
+}
+
 extern void on_host_request(infra_channel_desc_t * channel);
+extern void alarm_heartbeat(void);
 
 /*
  * 主循环函数
  */
 static inline _s32 loop(void)
 {
-
+    
     if (net_poll_request(drv_serialchannel_getchannel())) {     //侦听来自slamcore的interchip协议报文
 
         on_host_request(drv_serialchannel_getchannel());        //响应来自slamcore的interchip协议报文
     }
+    led_heartbeat();
     dev_heartbeat();                                            //处理各个功能模块
+    alarm_heartbeat();
     return 1;
 }
 /*
@@ -208,7 +279,7 @@ int main(void)
     enable_watchdog();
 
 #if defined(CONFIG_BREAKOUT_REV) && (CONFIG_BREAKOUT_REV >= 3)
-    DBG_OUT("Slamware base breakout rev %d.0.\r\n", CONFIG_BREAKOUT_REV);
+    DBG_OUT("Slarmware base breakout rev %d.0.\r\n", CONFIG_BREAKOUT_REV);
 #endif
 
     while (loop()) {

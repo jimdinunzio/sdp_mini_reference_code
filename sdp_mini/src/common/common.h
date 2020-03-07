@@ -43,14 +43,14 @@
 #define DBG_OUT(...)
 #endif
 
-#define FIRMWARE_VERSION_MAJOR        (0)
-#define FIRMWARE_VERSION_MINOR        (90)
+#define FIRMWARE_VERSION_MAJOR        (1)
+#define FIRMWARE_VERSION_MINOR        (20)
 #define HARDWARE_VERSION_MAJOR        (1)
 
 #define SSID_LEN    40
 #define IP_LEN      20
 
-#if defined(__ICCARM__) || defined(__CC_ARM) || defined(_WIN32)
+#if defined(__ICCARM__) || defined(_WIN32) || defined(__CC_ARM)
 #pragma pack(1)
 #endif
 
@@ -61,10 +61,67 @@ typedef struct _baseInfo {
     _u32 serialNumber[3];
 } __attribute__ ((packed)) baseInfo_t;
 
-#if defined(__ICCARM__) || defined(__CC_ARM) || defined(_WIN32)
+#if defined(__ICCARM__) || defined(_WIN32) || defined(__CC_ARM)
 #pragma pack()
 #endif
 
+#define SdpStatusStartingUp          0
+#define SdpStatusIdle                1
+#define SdpStatusCoreDisconnected    2
+#define SdpStatusUpgradingFirmware   3
+#define SdpStatusStartSweep          4
+#define SdpStatusSpotSweep           5
+#define SdpStatusUpgradeFirmwareOK   6
+
+#define SDP_UPGRADE_START_BEEP_TS       2000
+#define SDP_UPGRADE_START_BEEP_VOLUME   2
+
+#define SDP_UPGRADE_STOP_BEEP_TS        1000
+#define SDP_UPGRADE_STOP_BEEP_VOLUME    2
+
+#define SDP_UPGRADE_START_BEEP_FREQ     5000
+#define SDP_UPGRADE_STOP_BEEP_FREQ0     5000
+#define SDP_UPGRADE_STOP_BEEP_FREQ1     6000
+#define SDP_UPGRADE_STOP_BEEP_FREQ2     7000
+
+/**
+ @brief input port definitions.
+ */
+typedef struct _in_port {
+    GPIO_TypeDef *port;         /**< input port. */
+    _u16          pin;          /**< input pin. */
+    _u8           level;        /**< input trigger level. */
+} in_port_t;
+
+/**
+ @brief output definitions.
+ */
+typedef struct _out_port {
+    GPIO_TypeDef *port;         /**< output port. */
+    _u16          pin;          /**< output pin. */
+    _u8           level;        /**< output default level. */
+} out_port_t;
+
+/**
+ @brief pwm control port definitions.
+ */
+typedef struct _pwm_port {
+    GPIO_TypeDef *port;         /**< pwm control port. */
+    _u16          pin;          /**< pwm control pin. */
+    TIM_TypeDef  *tim;          /**< pwm timer. */
+    _u8           tim_ch;       /**< pwm channel. */
+} pwm_port_t;
+
+/**
+ @brief external interrupt port definitions.
+ */
+typedef struct _exti_cfg {
+    GPIO_TypeDef *port;         /**< EXTI port. */
+    _u16          pin;          /**< EXTI pin. */
+    _u8           exti;         /**< external interrupt. */
+} exti_port_t;
+
 extern baseInfo_t baseInfo;
+extern _u8 currentNcmd;
 
 _s32 init_board();

@@ -188,8 +188,7 @@ static int init_dev_irdetector()
     pinMode(FRONT_IR_R4_PORT, FRONT_IR_R4_PIN, GPIO_Mode_AIN, GPIO_Speed_50MHz);
 #endif
 
-    pinMode(BOTTOM_IR_E_PORT, BOTTOM_IR_E_PIN, GPIO_Mode_Out_PP, GPIO_Speed_50MHz);
-    pinSet(BOTTOM_IR_E_PORT, BOTTOM_IR_E_PIN, Bit_SET);
+    pinMode(BOTTOM_IR_E_PORT, BOTTOM_IR_E_PIN, GPIO_Mode_AF_PP, GPIO_Speed_50MHz);
     pinMode(BOTTOM_IR_R1_PORT, BOTTOM_IR_R1_PIN, GPIO_Mode_AIN, GPIO_Speed_50MHz);
     pinMode(BOTTOM_IR_R2_PORT, BOTTOM_IR_R2_PIN, GPIO_Mode_AIN, GPIO_Speed_50MHz);
     pinMode(BOTTOM_IR_R3_PORT, BOTTOM_IR_R3_PIN, GPIO_Mode_AIN, GPIO_Speed_50MHz);

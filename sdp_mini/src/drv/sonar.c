@@ -31,6 +31,7 @@
 #include "common/common.h"
 #include "utils/filters.h"
 #include "drv/gpio.h"
+#include "drv/exti.h"
 #include "drv/led.h"
 #include "sonar.h"
 
@@ -44,10 +45,13 @@
   EXTI line 5,7,8,9 with interrupt.
   TIM6 as counter timer.
  */
+//#define CONFIG_SONAR_DEBUG      1
 
+#ifdef CONFIG_SONAR_DEBUG
 #define sonar_dbg(fmt, args...)     DBG_OUT("[sonar]: " fmt, ##args)
-
-#define EXTI_LINE(l)        (EXTI_Line0 << (l))
+#else
+#define sonar_dbg(fmt, args...)     
+#endif
 
 #define SONAR_TIMER         TIM6
 
@@ -61,9 +65,9 @@ static sonar_channel_t g_sonar[CONFIG_SONAR_CHANNEL_NUM];
 /**
  @brief Global sonar channel configurations.
  */
-static const sonar_cfg_t g_sonar_cfg[CONFIG_SONAR_CHANNEL_NUM] = {
+static const sonar_cfg_t g_sonar_cfg[] = {
     {SONAR_TRIG1_PORT, SONAR_TRIG1_PIN, SONAR_ECHO1_PORT, SONAR_ECHO1_PIN, 5},
-    {SONAR_TRIG2_PORT, SONAR_TRIG2_PIN, SONAR_ECHO2_PORT, SONAR_ECHO2_PIN, 7},
+//    {SONAR_TRIG2_PORT, SONAR_TRIG2_PIN, SONAR_ECHO2_PORT, SONAR_ECHO2_PIN, 7},
     {SONAR_TRIG3_PORT, SONAR_TRIG3_PIN, SONAR_ECHO3_PORT, SONAR_ECHO3_PIN, 8},
     {SONAR_TRIG4_PORT, SONAR_TRIG4_PIN, SONAR_ECHO4_PORT, SONAR_ECHO4_PIN, 9},
 };
@@ -93,6 +97,41 @@ static inline void SONAR_TRIG(uint8_t ch, uint8_t level)
     }
 }
 
+static void sonar_exti_cb(void)
+{
+    uint8_t  id;
+    uint8_t  status;
+    TIM_TimeBaseInitTypeDef tim_base;
+
+    status = SONAR_ECHO(g_sonar_ch);
+    if (status == HIGH) {
+        RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM6, ENABLE);
+        /* Start counter timer. */
+        tim_base.TIM_Period = 60000;
+        tim_base.TIM_Prescaler = (SYSTICK_1MS_TICKS/1000-1);
+        tim_base.TIM_ClockDivision = TIM_CKD_DIV1;
+        tim_base.TIM_CounterMode = TIM_CounterMode_Up;
+
+        TIM_TimeBaseInit(SONAR_TIMER, &tim_base);
+        TIM_SetCounter(SONAR_TIMER, 0);
+        TIM_Cmd(SONAR_TIMER, ENABLE);
+    } else {
+        /* Stop counter timer. */
+        TIM_Cmd(SONAR_TIMER, DISABLE);
+
+        id = g_sonar[g_sonar_ch].id;
+        if (id >= CONFIG_SONAR_SAMPLE_SIZE) {
+            id = 0;
+        }
+        g_sonar[g_sonar_ch].sample[id++] = TIM_GetCounter(SONAR_TIMER);
+        g_sonar[g_sonar_ch].state++;    /* Move to next state. */
+        g_sonar[g_sonar_ch].id = id;
+        if (g_sonar[g_sonar_ch].cnt < CONFIG_SONAR_SAMPLE_SIZE) {
+            g_sonar[g_sonar_ch].cnt++;
+        }
+    }
+}
+
 /**
  @brief Trigger a sonar channel.
  @param ch - channel number to be triggered, 1 ~ CONFIG_SONAR_CHANNEL_NUM.
@@ -101,9 +140,7 @@ static inline void SONAR_TRIG(uint8_t ch, uint8_t level)
  */
 static void sonar_trigger(uint8_t ch)
 {
-    EXTI_InitTypeDef exti;
-
-    if (ch >= CONFIG_SONAR_CHANNEL_NUM) {
+    if (ch >= _countof(g_sonar_cfg)) {
         return ;
     }
 
@@ -114,13 +151,7 @@ static void sonar_trigger(uint8_t ch)
 
     /* Prepare for echo rising edge interrupt. */
     GPIO_EXTILineConfig(GPIO_PortSourceGPIOE, g_sonar_cfg[ch].exti_line);
-
-    /* Configure EXTI lines. */
-    exti.EXTI_Mode    = EXTI_Mode_Interrupt;
-    exti.EXTI_Trigger = EXTI_Trigger_Rising_Falling;
-    exti.EXTI_LineCmd = ENABLE;
-    exti.EXTI_Line    = EXTI_LINE(g_sonar_cfg[ch].exti_line);
-    EXTI_Init(&exti);
+    exti_reg_callback(g_sonar_cfg[ch].exti_line, EXTI_Trigger_Rising_Falling, sonar_exti_cb);
     return ;
 }
 
@@ -132,20 +163,12 @@ static void sonar_trigger(uint8_t ch)
  */
 static void sonar_shutdown(uint8_t ch)
 {
-    EXTI_InitTypeDef exti;
-
-    if (ch >= CONFIG_SONAR_CHANNEL_NUM) {
+    if (ch >= _countof(g_sonar_cfg)) {
         return ;
     }
 
     SONAR_TRIG(ch, LOW);
-
-    /* Configure EXTI lines. */
-    exti.EXTI_Mode    = EXTI_Mode_Interrupt;
-    exti.EXTI_Trigger = EXTI_Trigger_Rising_Falling;  
-    exti.EXTI_LineCmd = DISABLE;
-    exti.EXTI_Line    = EXTI_LINE(g_sonar_cfg[ch].exti_line);
-    EXTI_Init(&exti);
+    exti_unreg_callback(g_sonar_cfg[ch].exti_line);
     return ;
 }
 
@@ -162,13 +185,13 @@ static void sonar_distance(uint8_t ch)
     uint32_t avg;
     float    d;
 
-    if (ch >= CONFIG_SONAR_CHANNEL_NUM) {
+    if (ch >= _countof(g_sonar_cfg)) {
         return ;
     }
 
     avg = 0;
     for (i = 0; i < g_sonar[ch].cnt; i++) {
-        avg += g_sonar[g_sonar_ch].sample[i];
+        avg += g_sonar[ch].sample[i];
     }
     if (i > 0) {
         avg /= i;
@@ -179,57 +202,10 @@ static void sonar_distance(uint8_t ch)
     d = CONFIG_SONAR_COE_A + CONFIG_SONAR_COE_B * CONFIG_SONAR_COE_T;
     d *= avg / 2 / 1000.0;
 #ifdef CONFIG_SONAR_DISTANCE_Q16
-    g_sonar[g_sonar_ch].distance = (uint32_t)FP_Q16(d);
+    g_sonar[ch].distance = (uint32_t)FP_Q16(d);
 #else
-    g_sonar[g_sonar_ch].distance = (uint32_t)d;
+    g_sonar[ch].distance = (uint32_t)d;
 #endif
-}
-
-/**
- @brief external line interrupt handler.
- @param none.
- @return none.
- */
-void EXTI9_5_IRQHandler(void)
-{
-    uint8_t  id;
-    uint8_t  status;
-    uint32_t line;
-    TIM_TimeBaseInitTypeDef tim_base;
-
-    /* Get EXTI for the active channel. */
-    line = EXTI_LINE(g_sonar_cfg[g_sonar_ch].exti_line);
-    if (EXTI_GetITStatus(line) != RESET) {
-        EXTI_ClearITPendingBit(line);
-
-        status = SONAR_ECHO(g_sonar_ch);
-        if (status == HIGH) {
-            RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM6, ENABLE);
-            /* Start counter timer. */
-            tim_base.TIM_Period = 60000;
-            tim_base.TIM_Prescaler = (SYSTICK_1MS_TICKS/1000-1);
-            tim_base.TIM_ClockDivision = TIM_CKD_DIV1;
-            tim_base.TIM_CounterMode = TIM_CounterMode_Up;
-
-            TIM_TimeBaseInit(SONAR_TIMER, &tim_base);
-            TIM_SetCounter(SONAR_TIMER, 0);
-            TIM_Cmd(SONAR_TIMER, ENABLE);
-        } else {
-            /* Stop counter timer. */
-            TIM_Cmd(SONAR_TIMER, DISABLE);
-
-            id = g_sonar[g_sonar_ch].id;
-            if (id >= CONFIG_SONAR_SAMPLE_SIZE) {
-                id = 0;
-            }
-            g_sonar[g_sonar_ch].sample[id++] = TIM_GetCounter(SONAR_TIMER);
-            g_sonar[g_sonar_ch].state++;    /* Move to next state. */
-            g_sonar[g_sonar_ch].id = id;
-            if (g_sonar[g_sonar_ch].cnt < CONFIG_SONAR_SAMPLE_SIZE) {
-                g_sonar[g_sonar_ch].cnt++;
-            }
-        }
-    }
 }
 
 /**
@@ -247,7 +223,7 @@ void EXTI9_5_IRQHandler(void)
  */
 void sonar_heartbeat(void)
 {
-    if (g_sonar_ch >= CONFIG_SONAR_CHANNEL_NUM) {
+    if (g_sonar_ch >= _countof(g_sonar_cfg)) {
         g_sonar_ch = 0;
         g_sonar[g_sonar_ch].state = SONAR_INIT;
     }
@@ -267,10 +243,10 @@ void sonar_heartbeat(void)
             g_sonar[g_sonar_ch].state = SONAR_IDLE;
 			memset(g_sonar[g_sonar_ch].sample, 0, sizeof(g_sonar[g_sonar_ch].sample));
             g_sonar_ch++;
-            if (g_sonar_ch >= CONFIG_SONAR_CHANNEL_NUM) {
+            if (g_sonar_ch >= _countof(g_sonar_cfg)) {
                 g_sonar_ch = 0;
             }
-            drv_led_set(0, 0, 0);
+//            drv_led_set(0, 0, 0);
         }
         break;
     case SONAR_DONE:    /* Measurement is done. */
@@ -283,7 +259,7 @@ void sonar_heartbeat(void)
         sonar_distance(g_sonar_ch);
         g_sonar[g_sonar_ch].state++;
         /* Blink the led by channel. */
-        drv_led_set((g_sonar_ch%3)==0?0x10:0, (g_sonar_ch%3)==1?0x10:0, (g_sonar_ch%3)==2?0x10:0);
+//        drv_led_set((g_sonar_ch%3)==0?1:0, (g_sonar_ch%3)==1?1:0, (g_sonar_ch%3)==2?1:0);
         sonar_dbg("ch %d, distance %d\r\n", g_sonar_ch, g_sonar[g_sonar_ch].distance);
         break;
     case SONAR_EXIT:    /* Channel measurement is done. Move to next. */
@@ -291,11 +267,14 @@ void sonar_heartbeat(void)
         g_sonar[g_sonar_ch].ticks = getms();
         g_sonar[g_sonar_ch].state = SONAR_IDLE;
         g_sonar_ch++;
-        if (g_sonar_ch >= CONFIG_SONAR_CHANNEL_NUM) {
+        if (g_sonar_ch >= _countof(g_sonar_cfg)) {
             g_sonar_ch = 0;
         }
         break;
     default:
+        if (getms() - g_sonar[g_sonar_ch].ticks < CONFIG_SONAR_TICKS) {
+            break;
+        }
         g_sonar[g_sonar_ch].state = SONAR_INIT;
         break;
     }
@@ -310,7 +289,7 @@ void sonar_heartbeat(void)
  */
 uint32_t sonar_get(uint8_t ch)
 {
-    if (ch >= CONFIG_SONAR_CHANNEL_NUM) {
+    if (ch >= _countof(g_sonar_cfg)) {
         return 0;
     }
 
@@ -328,7 +307,7 @@ void sonar_init(void)
     uint8_t ch;
 
     /* These pins are pull up by default. So pull down them. */
-    for (ch = 0; ch < CONFIG_SONAR_CHANNEL_NUM; ch++) {
+    for (ch = 0; ch < _countof(g_sonar_cfg); ch++) {
         pinMode(g_sonar_cfg[ch].echo_port, g_sonar_cfg[ch].echo_pin,
                 GPIO_Mode_IPD, GPIO_Speed_10MHz);
         pinMode(g_sonar_cfg[ch].trig_port, g_sonar_cfg[ch].trig_pin,
@@ -350,7 +329,7 @@ void sonar_exit(void)
 {
     uint8_t ch;
 
-    for (ch = 0; ch < CONFIG_SONAR_CHANNEL_NUM; ch++) { 
+    for (ch = 0; ch < _countof(g_sonar_cfg); ch++) { 
         SONAR_TRIG(ch, 0);
     }
 
