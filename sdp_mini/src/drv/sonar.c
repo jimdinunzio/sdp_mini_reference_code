@@ -34,6 +34,7 @@
 #include "drv/exti.h"
 #include "drv/led.h"
 #include "sonar.h"
+#include "drv/motor.h"                                                          //AB
 
 #if defined(CONFIG_BREAKOUT_REV) && (CONFIG_BREAKOUT_REV >= 3)
 /**
@@ -67,7 +68,7 @@ static sonar_channel_t g_sonar[CONFIG_SONAR_CHANNEL_NUM];
  */
 static const sonar_cfg_t g_sonar_cfg[] = {
     {SONAR_TRIG1_PORT, SONAR_TRIG1_PIN, SONAR_ECHO1_PORT, SONAR_ECHO1_PIN, 5},
-//    {SONAR_TRIG2_PORT, SONAR_TRIG2_PIN, SONAR_ECHO2_PORT, SONAR_ECHO2_PIN, 7},
+    {SONAR_TRIG2_PORT, SONAR_TRIG2_PIN, SONAR_ECHO2_PORT, SONAR_ECHO2_PIN, 7},  //AB uncommented
     {SONAR_TRIG3_PORT, SONAR_TRIG3_PIN, SONAR_ECHO3_PORT, SONAR_ECHO3_PIN, 8},
     {SONAR_TRIG4_PORT, SONAR_TRIG4_PIN, SONAR_ECHO4_PORT, SONAR_ECHO4_PIN, 9},
 };
@@ -90,6 +91,8 @@ static inline uint8_t SONAR_ECHO(uint8_t ch)
  */
 static inline void SONAR_TRIG(uint8_t ch, uint8_t level)
 {
+//  DBG_OUT("SONAR_TRIG %d  %d   %d\r\n",ch,g_sonar_cfg[ch].trig_port, g_sonar_cfg[ch].trig_pin);                                      //AB
+
     if (level == HIGH) {
         GPIO_SetBits(g_sonar_cfg[ch].trig_port, g_sonar_cfg[ch].trig_pin);
     } else {
@@ -201,6 +204,8 @@ static void sonar_distance(uint8_t ch)
 
     d = CONFIG_SONAR_COE_A + CONFIG_SONAR_COE_B * CONFIG_SONAR_COE_T;
     d *= avg / 2 / 1000.0;
+//DBG_OUT("sonar dist %d %d    %d\r\n",ch,(int)d, (uint32_t)FP_Q16(d));                                               //AB
+
 #ifdef CONFIG_SONAR_DISTANCE_Q16
     g_sonar[ch].distance = (uint32_t)FP_Q16(d);
 #else
@@ -227,7 +232,6 @@ void sonar_heartbeat(void)
         g_sonar_ch = 0;
         g_sonar[g_sonar_ch].state = SONAR_INIT;
     }
-
     switch (g_sonar[g_sonar_ch].state) {
     case SONAR_INIT:
         sonar_trigger(g_sonar_ch);
@@ -289,10 +293,21 @@ void sonar_heartbeat(void)
  */
 uint32_t sonar_get(uint8_t ch)
 {
-    if (ch >= _countof(g_sonar_cfg)) {
+//  DBG_OUT("Sonar get for chan %d\r\n", ch);                                   //AB
+    if (ch >= (_countof(g_sonar_cfg)+2)) {                                      //AB allow for return motor data in 4 & 5
         return 0;
     }
-
+    
+    if (ch == 4){
+//DBG_OUT(" sonar %d  value  %d\r\n",ch, walkingmotor_get_veloCmd());                                    //AB    
+      return walkingmotor_get_veloCmd();  
+      }//AB return speed command
+    if (ch == 5){
+//DBG_OUT(" sonar %d  value  %d\r\n",ch,walkingmotor_get_turnCmd());                               //AB    
+      return walkingmotor_get_turnCmd();
+      }//AB return turn rate command
+    
+//DBG_OUT(" sonar %d  value  %d\r\n",ch, g_sonar[ch].distance);                   //AB    
     sonar_distance(ch);
     return g_sonar[ch].distance;
 }
@@ -305,7 +320,7 @@ uint32_t sonar_get(uint8_t ch)
 void sonar_init(void)
 {
     uint8_t ch;
-
+DBG_OUT("sonar_init  %d\r\n",_countof(g_sonar_cfg));                                                      //AB
     /* These pins are pull up by default. So pull down them. */
     for (ch = 0; ch < _countof(g_sonar_cfg); ch++) {
         pinMode(g_sonar_cfg[ch].echo_port, g_sonar_cfg[ch].echo_pin,

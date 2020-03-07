@@ -59,8 +59,7 @@ extern void shutdown_ticks_update(void);
 
 #ifdef FEATURE_SET_V
 
-static const float robot_radius_mm = 80.0f;
-
+static const float robot_radius_mm = TURN_RADIUS;       // from motor.h 
 static bool is_first_motor_data = true;
 static int last_motor_l_speed = 0;
 static int last_motor_r_speed = 0;
@@ -81,7 +80,8 @@ static void calculateMotorStatus(base_deadreckon_response_t* ans_pkt)
     }
     else
     {
-        if(last_motor_l_speed < 0)
+/* //AB deleted this since walkingmotor_delta_l/rdist)mm_f() now returns signed distance 
+      if(last_motor_l_speed < 0)
         {
             d_dist_l_mm_f = -d_dist_l_mm_f;
         }
@@ -89,15 +89,15 @@ static void calculateMotorStatus(base_deadreckon_response_t* ans_pkt)
         {
             d_dist_r_mm_f = -d_dist_r_mm_f;
         }
+*/
         float d_yaw = (d_dist_r_mm_f - d_dist_l_mm_f) / 2.0f / robot_radius_mm;
         float displacement = (d_dist_l_mm_f + d_dist_r_mm_f) / 2.0f;
         
         float dx = cos(d_yaw)*displacement;
         float dy = sin(d_yaw)*displacement;
-        
         ans_pkt->base_dx_mm_q16 = (_s32)(dx * (1<<16));
         ans_pkt->base_dy_mm_q16 = (_s32)(dy * (1<<16));
-        ans_pkt->base_dtheta_degree_q16 = (_s32)(d_yaw / M_PIf * 180 * (1<<16));       
+        ans_pkt->base_dtheta_degree_q16 = (_s32)(d_yaw / M_PIf * 180 * (1<<16));  
     }   
 }
 #endif
@@ -134,13 +134,14 @@ static void on_request_slamcore_cb(infra_channel_desc_t * channel)
         {
             base_conf_response_t ans_pkt;                                               //  ^ z
             ans_pkt.base_type = CIRCLE;                                                 //  |          . y
-            ans_pkt.base_radius_q8 = (_u32) (FP_Q8(120));                               //  |        .
+            ans_pkt.base_radius_q8 = (_u32) (FP_Q8(120));  //AB another constant?       //  |        .
             ans_pkt.base_motor_type = TWO_WHEEL;                                        //  |      .
             ans_pkt.base_sensor_num = 0;                                                //  |    .
             memset(ans_pkt.base_sensors, 0, sizeof(base_pos_t) * 8);                    //  |   .
             ans_pkt.base_bumper_num = 0;                                                //  | .
             memset(ans_pkt.base_bumpers, 0, sizeof(base_pos_t) * 8);                    //  |- - - - - - - > x   右手笛卡尔坐标系
 #if defined(CONFIG_BREAKOUT_REV) && (CONFIG_BREAKOUT_REV >= 3)
+DBG_OUT("RH1  Get Base Conf \r\n");                                                                //AB
             // base_sensors
             ans_pkt.base_sensors[0].y_to_center_mm_q8 = (_s32)(FP_Q8(0.0));
             ans_pkt.base_sensors[0].x_to_center_mm_q8 = (_s32)(FP_Q8(-80.0));
@@ -179,6 +180,7 @@ static void on_request_slamcore_cb(infra_channel_desc_t * channel)
         
     case SLAMWARECORECB_CMD_GET_BINARY_CONF:
         {
+DBG_OUT("RH2  Get BinaryConf \r\n");
             net_send_ans(channel, slamware_config, slamware_config_size);
         }
         break;

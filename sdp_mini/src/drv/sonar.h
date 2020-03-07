@@ -54,7 +54,7 @@
 #define CONFIG_SONAR_COE_B              0.607   /*< Sonar distance coefficient B. */
 #define CONFIG_SONAR_COE_T              20      /*< Sonar distance coefficient T at 20. */
 
-#define CONFIG_SONAR_CHANNEL_NUM        4       /**< Sonar channel number. */
+#define CONFIG_SONAR_CHANNEL_NUM        6       /**< Sonar channel number. */   //AB allow for return speed & turnrate commands
 #define CONFIG_SONAR_SAMPLE_SIZE        4       /**< Sonar sample buffer size. */
 #define CONFIG_SONAR_TIMEOUT_MS         50      /**< Sonar detection timeout in ms. */
 #define CONFIG_SONAR_TICKS              100     /**< Sonar detection timeout in ms. */
