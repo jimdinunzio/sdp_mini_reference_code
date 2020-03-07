@@ -1,0 +1,6 @@
+base_ref_dfu/
+output/
+settings/
+*.dep
+*.ewd
+*.ewt

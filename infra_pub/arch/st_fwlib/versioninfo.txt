@@ -1,0 +1,4 @@
+2011-6-30 Using ST StdPeriph Lib V3.5.0
+2012-5-7  Using ST USB-FS-Device Lib V3.3.0
+2014-5-10 Using ST StdPeriph Lib for STM32F4 V1.3.0
+2014-5-10 Using ST USB Libs
