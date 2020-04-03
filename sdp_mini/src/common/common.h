@@ -31,7 +31,7 @@
 #pragma once
 
 
-//#define _DEBUG
+#define _DEBUG
 //#define _PROTOTYPE_BOARD
 
 #include "rpstm32.h"

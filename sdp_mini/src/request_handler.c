@@ -59,11 +59,11 @@ extern void shutdown_ticks_update(void);
 
 #ifdef FEATURE_SET_V
 
-static const float robot_radius_mm = 80.0f;
+static const float robot_radius_mm = TURN_RADIUS;
 
 static bool is_first_motor_data = true;
-static int last_motor_l_speed = 0;
-static int last_motor_r_speed = 0;
+//static int last_motor_l_speed = 0;
+//static int last_motor_r_speed = 0;
 
 static void calculateMotorStatus(base_deadreckon_response_t* ans_pkt)
 {
@@ -81,7 +81,8 @@ static void calculateMotorStatus(base_deadreckon_response_t* ans_pkt)
     }
     else
     {
-        if(last_motor_l_speed < 0)
+// walkingmotor_delta_l/rdist_mm_f() now returns signed distance.
+/*        if(last_motor_l_speed < 0)
         {
             d_dist_l_mm_f = -d_dist_l_mm_f;
         }
@@ -89,6 +90,7 @@ static void calculateMotorStatus(base_deadreckon_response_t* ans_pkt)
         {
             d_dist_r_mm_f = -d_dist_r_mm_f;
         }
+*/
         float d_yaw = (d_dist_r_mm_f - d_dist_l_mm_f) / 2.0f / robot_radius_mm;
         float displacement = (d_dist_l_mm_f + d_dist_r_mm_f) / 2.0f;
         
@@ -239,6 +241,7 @@ static void on_request_slamcore_cb(infra_channel_desc_t * channel)
             if (!bumpermonitor_filter_motorcmd(ans_pkt->motor_speed_mm[0], ans_pkt->motor_speed_mm[1])) {
                 set_walkingmotor_speed(ans_pkt->motor_speed_mm[0], ans_pkt->motor_speed_mm[1]);
 #ifdef FEATURE_SET_V
+/*
                 if(ans_pkt->motor_speed_mm[0] != 0)
                 {
                     last_motor_l_speed = ans_pkt->motor_speed_mm[0];
@@ -247,6 +250,7 @@ static void on_request_slamcore_cb(infra_channel_desc_t * channel)
                 {
                     last_motor_r_speed = ans_pkt->motor_speed_mm[1];
                 }
+*/
 #endif
             }
             net_send_ans(channel, NULL, 0);
@@ -267,6 +271,7 @@ static void on_request_slamcore_cb(infra_channel_desc_t * channel)
           
             set_walkingmotor_speed((int32_t)bumpermonitor_clamp_motorcmd(speed_l_mm),
                                    (int32_t)bumpermonitor_clamp_motorcmd(speed_r_mm));
+/*
             if(speed_l_mm != 0)
             {
                 last_motor_l_speed = (int)speed_l_mm;
@@ -275,6 +280,7 @@ static void on_request_slamcore_cb(infra_channel_desc_t * channel)
             {
                 last_motor_r_speed = (int)speed_r_mm;
             }
+*/
             ans_pkt.status_bitmap |= (stalldetector_is_stalled()?BASE_MOTOR_STATUS_STALL:0);
             ans_pkt.status_bitmap |= (is_ontheground()?0:BASE_MOTOR_TRACTION_LOST);
             net_send_ans(channel, &ans_pkt, sizeof(base_deadreckon_response_t));

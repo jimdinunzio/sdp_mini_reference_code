@@ -30,11 +30,11 @@
 
 #pragma once
 
+
+// TURN_RADIUS is half the distance between the wheel centers
+#define TURN_RADIUS                     (147)    // radius for turning in mm. 
+    
 #define CONFIG_MOTOR_ENCODER_NUM        2
-
-#define CONFIG_MOTOR_ENCODER_FILTER     1
-#define MOTOR_ENCODER_FILTER_INTERVAL   100     /**< Encoder filter interval in us. */
-
 #define CONFIG_MOTOR_PWM_PERIOD         (5000)
 
 /**
@@ -44,79 +44,72 @@
 #define MOTO_EN_PIN                 GPIO_Pin_15  /**< PB15 is motor enable. */
 
 /**
- @brief Left walking motor hardware configurations.
- */
-#define MOTO_LF_PWM_PORT            GPIOE       /** PE13 is left forward motor pwm. */
-#define MOTO_LF_PWM_PIN             GPIO_Pin_13
-
-#define MOTO_LF_PWM_ID              1           /**< PE13 is TIM1_CH4 */
-#define MOTO_LF_PWM_CHN             3
-#define MOTO_LF_PWM                 (GET_TIM(MOTO_LF_PWM_ID))
-
-#define MOTO_LB_PWM_PORT            GPIOE       /** PE14 is left forward motor pwm. */
-#define MOTO_LB_PWM_PIN             GPIO_Pin_14
-
-#define MOTO_LB_PWM_ID              1           /**< PE14 is TIM1_CH3 */
-#define MOTO_LB_PWM_CHN             4
-#define MOTO_LB_PWM                 (GET_TIM(MOTO_LB_PWM_ID))
-
-#define MOTO_LI_MONI_PORT           GPIOD       /**< PD5 is left motor overcurrent monitor. */
-#define MOTO_LI_MONI_PIN            GPIO_Pin_5
-
-/**
  @brief Right walking motor hardware configurations.
  */
-#define MOTO_RF_PWM_PORT            GPIOB       /** PB9 is right motor pwm. */
-#define MOTO_RF_PWM_PIN             GPIO_Pin_9
+#define MOTO_R_PWM_PORT            GPIOE       /** PE13 is right motor pwm. */
+#define MOTO_R_PWM_PIN             GPIO_Pin_13
 
-#define MOTO_RF_PWM_ID              4
-#define MOTO_RF_PWM_CHN             4           /**< PB9 is TIM4_CH4 */
-#define MOTO_RF_PWM                 (GET_TIM(MOTO_RF_PWM_ID))
+#define MOTO_R_PWM_ID              1           /**< PE13 is TIM1_CH3 */
+#define MOTO_R_PWM_CHN             3
+#define MOTO_R_PWM                 (GET_TIM(MOTO_R_PWM_ID))
 
-#define MOTO_RB_PWM_PORT            GPIOB       /** PB8 is right motor pwm. */
-#define MOTO_RB_PWM_PIN             GPIO_Pin_8
+#define MOTO_R_DIR_PORT            GPIOB       /** PB8 is right motor direction. */
+#define MOTO_R_DIR_PIN             GPIO_Pin_8
 
-#define MOTO_RB_PWM_ID              4
-#define MOTO_RB_PWM_CHN             3           /**< PB8 is TIM4_CH3 */
-#define MOTO_RB_PWM                 (GET_TIM(MOTO_RB_PWM_ID))
+/**
+ @brief Left walking motor hardware configurations.
+ */
+#define MOTO_L_PWM_PORT            GPIOE       /** PE14 is left motor pwm. */
+#define MOTO_L_PWM_PIN             GPIO_Pin_14
 
-#define MOTO_RI_MONI_PORT           GPIOC       /**< PC5 is right motor overcurrent monitor. */
-#define MOTO_RI_MONI_PIN            GPIO_Pin_5
+#define MOTO_L_PWM_ID              1           /**< PE14 is TIM1_CH4 */
+#define MOTO_L_PWM_CHN             4
+#define MOTO_L_PWM                 (GET_TIM(MOTO_L_PWM_ID))
+
+#define MOTO_L_DIR_PORT            GPIOB       /** PB9 is left motor direction. */
+#define MOTO_L_DIR_PIN             GPIO_Pin_9
+
+//#define MOTO_LI_MONI_PORT           GPIOD       /**< PD5 is left motor overcurrent monitor. */
+//#define MOTO_LI_MONI_PIN            GPIO_Pin_5
+
+//#define MOTO_RI_MONI_PORT           GPIOC       /**< PC5 is right motor overcurrent monitor. */
+//#define MOTO_RI_MONI_PIN            GPIO_Pin_5
 
 /**
  @brief Encoder configure.
  */
-#define ENCODER_L1_PORT             GPIOD
-#define ENCODER_L1_PIN              GPIO_Pin_6
-#define ENCODER_L1_EXTI             6
+#define ENCODER_LA_PORT             GPIOD
+#define ENCODER_LA_PIN              GPIO_Pin_3
+#define ENCODER_LA_EXTI             3
 
-#define ENCODER_L2_PORT             GPIOD
-#define ENCODER_L2_PIN              GPIO_Pin_4
-#define ENCODER_L2_EXTI             4
+#define ENCODER_LB_PORT             GPIOD
+#define ENCODER_LB_PIN              GPIO_Pin_4
 
-#define ENCODER_R1_PORT             GPIOD
-#define ENCODER_R1_PIN              GPIO_Pin_2
-#define ENCODER_R1_EXTI             2
+#define ENCODER_RA_PORT             GPIOD
+#define ENCODER_RA_PIN              GPIO_Pin_2
+#define ENCODER_RA_EXTI             2
 
-#define ENCODER_R2_PORT             GPIOD
-#define ENCODER_R2_PIN              GPIO_Pin_3
-#define ENCODER_R2_EXTI             3
+#define ENCODER_RB_PORT             GPIOD
+#define ENCODER_RB_PIN              GPIO_Pin_6
 
+// HCR robot
+#define ODOMETER_EST_PULSE_PER_METER  (3946)
 /**< This value is calibrate by actual test. */
-#if defined(CONFIG_MOTOR_ENCODER_NUM) && (CONFIG_MOTOR_ENCODER_NUM == 2)
-#define ODOMETER_EST_PULSE_PER_METER  (13500UL*4/5)
-#else
-#define ODOMETER_EST_PULSE_PER_METER  6750UL
-#endif
+//#if defined(CONFIG_MOTOR_ENCODER_NUM) && (CONFIG_MOTOR_ENCODER_NUM == 2)
+//#define ODOMETER_EST_PULSE_PER_METER  (13500UL*4/5)
+//#else
+//#define ODOMETER_EST_PULSE_PER_METER  6750UL
+//#endif
 
 /**
  @brief motor driving port configure.
  */
 typedef struct _motor_cfg {
-    pwm_port_t  fw_pwm;         /**< Forward control pwm port. */
-    pwm_port_t  bk_pwm;         /**< Backward control pwm port. */
+    pwm_port_t  pwm;            /**< pwm port. */
+    out_port_t  dir;            /**< direction */
     in_port_t   oc_mon;         /**< Over-current monitoring port. */
-    exti_port_t encoder[CONFIG_MOTOR_ENCODER_NUM]; /**< Motor encoder odometer port. */
+    exti_port_t encoderA;       /**< Motor encoder interrupt port. */
+    in_port_t   encoderB;       /**< Motor encoder B input. */
     _u16        speed_factor;   /**< Odometer speed factor, in pulse per meter. */
 } motor_cfg_t;
 
@@ -129,13 +122,13 @@ typedef struct _encoder_filter {
     _u16 err;                   /**< Enocder error count. */
 } encoder_filter_t;
 
-//边刷电机管脚定义
+//Side brush motor pin definition
 #define BRUSH_L_GPIO     GPIOC
 #define BRUSH_L_PIN      GPIO_Pin_8
 #define BRUSH_R_GPIO     GPIOB
 #define BRUSH_R_PIN      GPIO_Pin_0
 
-//落地检测相关
+//Ground Detection related
 #define ONGROUND_GPIO       GPIOD
 #define ONGROUND_LEFT       GPIO_Pin_10
 #define ONGROUND_RIGHT      GPIO_Pin_1

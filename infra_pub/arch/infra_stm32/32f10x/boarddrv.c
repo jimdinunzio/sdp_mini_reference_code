@@ -91,8 +91,8 @@ uint32_t getms()
 
 #define SYSTICK_uS_PER_TICK      1000L/SYSTICK_1MS_TICKS
 /*
- * 获取微秒总累计数
- * 单位:us
+ * Get the total number of milliseconds
+ * Unit: ms
  */
 uint64_t getus()
 {

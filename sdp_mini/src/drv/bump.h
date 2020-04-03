@@ -34,6 +34,8 @@
 #define BUMP_GPIO       GPIOB
 #define BUMP_PIN_L      GPIO_Pin_5
 #define BUMP_PIN_R      GPIO_Pin_13
+#define BUMP_GPIO2      GPIOC
+#define BUMP_PIN_M      GPIO_Pin_3
 
 void init_bump_detect(void);
 _u8 is_bumped(void);

@@ -33,59 +33,58 @@
 #include "beep.h"
 #include "drv/timer.h"
 #include "drv/exti.h"
+#include "math.h"
 
 #define WALKINGMOTOR_CNT        2
 #define WALKINGMOTOR_L_ID       0
 #define WALKINGMOTOR_R_ID       1
 
-//#define CONFIG_MOTOR_PID_DEBUG      1
+#define CONFIG_MOTOR_PID_DEBUG      0
 
 /**
  @brief motor driving port configures.
  */
 static motor_cfg_t _motor_cfg[] = {
     {   /**< Left walking motor configure. */
-        {MOTO_LF_PWM_PORT, MOTO_LF_PWM_PIN, MOTO_LF_PWM, MOTO_LF_PWM_CHN},
-        {MOTO_LB_PWM_PORT, MOTO_LB_PWM_PIN, MOTO_LB_PWM, MOTO_LB_PWM_CHN},
+        {MOTO_L_PWM_PORT, MOTO_L_PWM_PIN, MOTO_L_PWM, MOTO_L_PWM_CHN},
+        {MOTO_L_DIR_PORT, MOTO_L_DIR_PIN, HIGH},
         {NULL, 0, LOW},
-        {
-            {ENCODER_L1_PORT, ENCODER_L1_PIN, ENCODER_L1_EXTI},
-            {ENCODER_L2_PORT, ENCODER_L2_PIN, ENCODER_L2_EXTI},
-        },
+        {ENCODER_LA_PORT, ENCODER_LA_PIN, ENCODER_LA_EXTI},
+        {ENCODER_LB_PORT, ENCODER_LB_PIN, LOW},
         ODOMETER_EST_PULSE_PER_METER,
     },
 
     {   /**< Right walking motor configure. */
-        {MOTO_RF_PWM_PORT, MOTO_RF_PWM_PIN, MOTO_RF_PWM, MOTO_RF_PWM_CHN},
-        {MOTO_RB_PWM_PORT, MOTO_RB_PWM_PIN, MOTO_RB_PWM, MOTO_RB_PWM_CHN},
+        {MOTO_R_PWM_PORT, MOTO_R_PWM_PIN, MOTO_R_PWM, MOTO_R_PWM_CHN},
+        {MOTO_R_DIR_PORT, MOTO_R_DIR_PIN, HIGH},
         {NULL, 0, LOW},
-        {
-            {ENCODER_R1_PORT, ENCODER_R1_PIN, ENCODER_R1_EXTI},
-            {ENCODER_R2_PORT, ENCODER_R2_PIN, ENCODER_R2_EXTI},
-        },
+        {ENCODER_RA_PORT, ENCODER_RA_PIN, ENCODER_RA_EXTI},
+        {ENCODER_RB_PORT, ENCODER_RB_PIN, LOW},
         ODOMETER_EST_PULSE_PER_METER,
     },
 };
 
-static encoder_filter_t _encoder_filters[WALKINGMOTOR_CNT][CONFIG_MOTOR_ENCODER_NUM];
+static _s32 _motorDeltaTicks[WALKINGMOTOR_CNT];           //Cumulative encoder value of walking motor
+static _u32  _motorDistAccumulated[WALKINGMOTOR_CNT];     // Cumulative walking distance in mm.
+static float _motorDistTailing[WALKINGMOTOR_CNT];         // The remaining value of the accumulated walking distance is less than 1mm for the next accumulation.
 
-static _u32 _motorDeltaTicks[WALKINGMOTOR_CNT];           //行走电机的累计编码器值
-static _u32  _motorDistAccumulated[WALKINGMOTOR_CNT];     // 累计的行走距离，单位mm.
-static float _motorDistTailing[WALKINGMOTOR_CNT];         // 累计的行走距离不到1mm的剩余值，用于下一次累计.
-
-static _u32 _encoder1TicksDelta[WALKINGMOTOR_CNT];               //detla时间内的编码器值
-static _u32 _lastEncoderTicksDelta[WALKINGMOTOR_CNT];           //最近一次 detla时间内的编码器值
-static float _lastOdometerSpeedAbs[WALKINGMOTOR_CNT];           //最近一次 detla时间内的速度值
+static _s32 _encoder1TicksDelta[WALKINGMOTOR_CNT];        //Encoder value in delta time
+static _s32 _lastEncoderTicksDelta[WALKINGMOTOR_CNT];     //Encoder value in the last delta time
+static float _lastOdometerSpeedAbs[WALKINGMOTOR_CNT];     //Speed ​​value in the last delta time
 
 #if defined(CONFIG_MOTOR_ENCODER_NUM) && (CONFIG_MOTOR_ENCODER_NUM == 2)
-static _u32 _encoder2TicksDelta[WALKINGMOTOR_CNT];               //detla时间内的编码器值
+static _s32 _encoder2TicksDelta[WALKINGMOTOR_CNT];               //detla时间内的编码器值
 #endif
 
 static _u8 _motorCtrlStates[WALKINGMOTOR_CNT];                  //行走电机方向
 static _s32 _motorSpeedMm[WALKINGMOTOR_CNT];                    //行走电机速度
 
-static const float Kp = 8;                     //PID 比例因子
-static const float Ki = 1.6;                   //PID 积分因子
+//static const float Kp = 8;                     //PID 比例因子
+//static const float Ki = 1.6;                   //PID 积分因子
+//static const float Kd = 0.0;                   //PID 微分因子
+
+static const float Kp = 1.0;                     //PID 比例因子
+static const float Ki = 0.4;                   //PID 积分因子
 static const float Kd = 0.0;                   //PID 微分因子
 
 static float speedLastErr[WALKINGMOTOR_CNT];
@@ -125,7 +124,7 @@ static void _init_motor_pwm(const pwm_port_t *pwm)
     /* Motor PWM ouput channel configure. */
     tim_oc.TIM_OCMode      = TIM_OCMode_PWM2;
     tim_oc.TIM_OutputState = TIM_OutputState_Enable;
-    tim_oc.TIM_Pulse       = CONFIG_MOTOR_PWM_PERIOD;
+    tim_oc.TIM_Pulse       = 0;
     tim_oc.TIM_OCPolarity  = TIM_OCPolarity_Low;
 
     tim_oc_init(pwm->tim, pwm->tim_ch, &tim_oc);
@@ -151,7 +150,7 @@ static void motor_set_duty(const pwm_port_t *pwm, int duty)
     if (duty > CONFIG_MOTOR_PWM_PERIOD) {
         duty = CONFIG_MOTOR_PWM_PERIOD;
     }
-    tim_set_compare(pwm->tim, pwm->tim_ch, CONFIG_MOTOR_PWM_PERIOD - duty);
+    tim_set_compare(pwm->tim, pwm->tim_ch, duty);
 
     if (duty > 0) {
         pinMode(pwm->port, pwm->pin, GPIO_Mode_AF_PP, GPIO_Speed_50MHz);
@@ -169,11 +168,10 @@ static void _set_walkingmotor_brake(_u8 id, int duty)
     if (id >= WALKINGMOTOR_CNT) {
         return ;
     }
-
-    /**< Motor driver use 2 pwm(forward, backward). */
-    /* Disable forward duty, disable backward duty. */
-    motor_set_duty(&_motor_cfg[id].fw_pwm, duty);
-    motor_set_duty(&_motor_cfg[id].bk_pwm, duty);
+    /**< Motor driver use pwm + direction. */
+    /* Disable duty */
+    motor_set_duty(&_motor_cfg[id].pwm, 0);
+    pinSet(_motor_cfg[id].dir.port, _motor_cfg[id].dir.pin, Bit_RESET);
     return ;
 }
 
@@ -185,18 +183,15 @@ static void _set_walkingmotor_brake(_u8 id, int duty)
 */
 static void _set_walkingmotor_forward(_u8 id, int duty)
 {
-    const pwm_port_t *pwm;
-
     if (id >= WALKINGMOTOR_CNT) {
         return ;
     }
 
     /* Enable forward duty. */
-    motor_set_duty(&_motor_cfg[id].fw_pwm, duty);
-    /* Disable backward duty. */
-    pwm = &_motor_cfg[id].bk_pwm;
-    pinMode(pwm->port, pwm->pin, GPIO_Mode_Out_PP, GPIO_Speed_50MHz);
-    pinSet(pwm->port, pwm->pin, Bit_SET);
+    //DBG_OUT("set walkingmotor forward, id = %d duty = %d\r\n", id, duty);
+    motor_set_duty(&_motor_cfg[id].pwm, duty);
+    pinSet(_motor_cfg[id].dir.port, _motor_cfg[id].dir.pin, 
+           id == WALKINGMOTOR_L_ID ? Bit_RESET : Bit_SET);
     return ;
 }
 
@@ -208,18 +203,15 @@ static void _set_walkingmotor_forward(_u8 id, int duty)
 */
 static void _set_walkingmotor_backward(_u8 id, int duty)
 {
-    const pwm_port_t *pwm;
-
     if (id >= WALKINGMOTOR_CNT) {
         return ;
     }
 
-    /* Disable forward duty. */
-    pwm = &_motor_cfg[id].fw_pwm;
-    pinMode(pwm->port, pwm->pin, GPIO_Mode_Out_PP, GPIO_Speed_50MHz);
-    pinSet(pwm->port, pwm->pin, Bit_SET);
     /* Enable backward duty. */
-    motor_set_duty(&_motor_cfg[id].bk_pwm, duty);
+    //DBG_OUT("set walkingmotor backward, id = %d, duty = %d\r\n", id, duty);
+    motor_set_duty(&_motor_cfg[id].pwm, duty);
+    pinSet(_motor_cfg[id].dir.port, _motor_cfg[id].dir.pin, 
+           id == WALKINGMOTOR_L_ID ? Bit_SET : Bit_RESET);
     return ;
 }
 
@@ -237,15 +229,12 @@ static void _set_walkingmotor_release(_u8 id)
         return ;
     }
 
-    /* Formward pwm output high. */
-    pwm = &_motor_cfg[id].fw_pwm;
+    /* pwm output high. */
+    //DBG_OUT("set walkingmotor release\r\n");
+    pwm = &_motor_cfg[id].pwm;
     pinMode(pwm->port, pwm->pin, GPIO_Mode_Out_PP, GPIO_Speed_50MHz);
-    pinSet(pwm->port, pwm->pin, Bit_SET);
-
-    /* Backward pwm output high. */
-    pwm = &_motor_cfg[id].bk_pwm;
-    pinMode(pwm->port, pwm->pin, GPIO_Mode_Out_PP, GPIO_Speed_50MHz);
-    pinSet(pwm->port, pwm->pin, Bit_SET);
+    pinSet(pwm->port, pwm->pin, Bit_RESET);
+    pinSet(_motor_cfg[id].dir.port, _motor_cfg[id].dir.pin, Bit_RESET);
     _delay_us(20);
     return ;
 }
@@ -274,8 +263,19 @@ static inline void _set_walkingmotor(_u8 id, _s32 duty, _s32 ctrl)
     _motorCtrlStates[id] = ctrl;
 }
 
+/**
+ @brief initialize out port
+ @param out_port output port
+ @return none
+*/
+void _init_out_port(const out_port_t *out_port)
+{
+    pinMode(out_port->port, out_port->pin, GPIO_Mode_Out_PP, GPIO_Speed_50MHz);
+    pinSet(out_port->port, out_port->pin, (BitAction)out_port->level);
+}
+
 /*
- * 左右行走电机初始化函数
+ * Left and right walking motor initialization function
  */
 void init_walkingmotor(void)
 {
@@ -289,14 +289,14 @@ void init_walkingmotor(void)
     GPIO_PinRemapConfig(GPIO_FullRemap_TIM1, ENABLE);
     GPIO_PinRemapConfig(GPIO_Remap_TIM4, DISABLE);
 
-    /* 开启电机电源. */
+    /* Power on the motor */
+    // this turns on "CURRENT_SET" on J21-9, needed to get motor drive power
     pinMode(MOTO_EN_PORT, MOTO_EN_PIN, GPIO_Mode_Out_PP, GPIO_Speed_50MHz);
     pinSet(MOTO_EN_PORT,  MOTO_EN_PIN, Bit_SET);
 
     for (i = 0; i < _countof(_motor_cfg); i++) {
-        _init_motor_pwm(&_motor_cfg[i].fw_pwm);
-        _init_motor_pwm(&_motor_cfg[i].bk_pwm);
-
+        _init_motor_pwm(&_motor_cfg[i].pwm);
+        _init_out_port(&_motor_cfg[i].dir);
         if (_motor_cfg[i].oc_mon.port != NULL) {
             pinMode(_motor_cfg[i].oc_mon.port, _motor_cfg[i].oc_mon.pin, GPIO_Mode_IN_FLOATING, GPIO_Speed_10MHz);
         }
@@ -313,60 +313,48 @@ void init_walkingmotor(void)
             (int)Kd, (int)((Kd-(int)Kd)*10));
 }
 
-
-static _u8 encoder_filter(_u8 motor, _u8 id)
-{
-#ifdef CONFIG_MOTOR_ENCODER_FILTER   /* Enable encoder filter. */
-    _u32 level = PIN_READ(_motor_cfg[motor].encoder[id].port,
-                          _motor_cfg[motor].encoder[id].pin);
-    _u32 ts = getus();
-    encoder_filter_t *filter = &_encoder_filters[motor][id];
+//   ENCODER CODE  ******************************************************
 
 
-    if (ts - filter->ts < MOTOR_ENCODER_FILTER_INTERVAL) {
-        filter->err++;
-        return 0;
-    }
-
-    if (level == filter->level) {
-        filter->err++;
-        return 0;
-    }
-    filter->ts = ts;
-    filter->level = level;
-#endif
-    return 1;
-}
-
-/*
- * 左行走电机编码器中断函数
- * 外部中断，双边沿触发
+/* Encoder interrupt handlers for normal encoders (many tick/revolution).
+ * Interrupt on rising and falling edges of channel A and determine direction from chan B
  */
-void encoder_l1_exti_cb(void)
+void encoder_LA_exti_cb(void)   
 {
-    _encoder1TicksDelta[WALKINGMOTOR_L_ID] += encoder_filter(0, 0);
+    static u8 encoderLALast = LOW;
+    static s8 dirL = 1;
+    u8 encoderLA = pinRead(ENCODER_LA_PORT, ENCODER_LA_PIN);
+    if (encoderLALast == LOW && encoderLA == HIGH)
+    {
+      u8 encoderLB = pinRead(ENCODER_LB_PORT, ENCODER_LB_PIN);
+      if (encoderLB == LOW && dirL == -1) 
+        dirL = 1;
+      else if (encoderLB == HIGH && dirL == 1)
+        dirL = -1;
+    }
+    _encoder1TicksDelta[WALKINGMOTOR_L_ID] += dirL;
+    encoderLALast = encoderLA;
 }
-void encoder_l2_exti_cb(void)
+
+void encoder_RA_exti_cb(void)
 {
-    _encoder2TicksDelta[WALKINGMOTOR_L_ID] += encoder_filter(0, 1);
+    static u8 encoderRALast = LOW;
+    static s8 dirR = 1;
+    u8 encoderRA = pinRead(ENCODER_RA_PORT, ENCODER_RA_PIN);
+    if (encoderRALast == LOW && encoderRA == HIGH)
+    {
+      u8 encoderRB = pinRead(ENCODER_RB_PORT, ENCODER_RB_PIN);
+      if (encoderRB == LOW && dirR == 1) 
+        dirR = -1;
+      else if (encoderRB == HIGH && dirR == -1)
+        dirR = 1;
+    }
+    _encoder1TicksDelta[WALKINGMOTOR_R_ID] += dirR;
+    encoderRALast = encoderRA;
 }
 
 /*
- * 右行走电机编码器中断函数
- * 外部中断，双边沿触发
- */
-void encoder_r1_exti_cb(void)
-{
-    _encoder1TicksDelta[WALKINGMOTOR_R_ID] += encoder_filter(1, 0);
-}
-void encoder_r2_exti_cb(void)
-{
-    _encoder2TicksDelta[WALKINGMOTOR_R_ID] += encoder_filter(1, 1);
-}
-
-/*
- * 左右行走电机编码器初始化函数
- * 外部中断接收，双边沿触发
+ * Set up interrupt hardware
  */
 static void init_extix(void)
 {
@@ -376,24 +364,18 @@ static void init_extix(void)
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOD, ENABLE);
 
     for (i = 0; i < _countof(_motor_cfg); i++) {
-        pinMode(_motor_cfg[i].encoder[0].port, _motor_cfg[i].encoder[0].pin, GPIO_Mode_IPU, GPIO_Speed_50MHz);
-        pinMode(_motor_cfg[i].encoder[1].port, _motor_cfg[i].encoder[1].pin, GPIO_Mode_IPU, GPIO_Speed_50MHz);
+        pinMode(_motor_cfg[i].encoderA.port, _motor_cfg[i].encoderA.pin, GPIO_Mode_IPU, GPIO_Speed_50MHz);
+        pinMode(_motor_cfg[i].encoderB.port, _motor_cfg[i].encoderB.pin, GPIO_Mode_IPU, GPIO_Speed_50MHz);
     }
 
-    GPIO_EXTILineConfig(GPIO_PortSource(_motor_cfg[WALKINGMOTOR_L_ID].encoder[0].port), _motor_cfg[WALKINGMOTOR_L_ID].encoder[0].exti);
-    GPIO_EXTILineConfig(GPIO_PortSource(_motor_cfg[WALKINGMOTOR_R_ID].encoder[0].port), _motor_cfg[WALKINGMOTOR_R_ID].encoder[0].exti);
-    exti_reg_callback(_motor_cfg[WALKINGMOTOR_L_ID].encoder[0].exti, EXTI_Trigger_Rising_Falling, encoder_l1_exti_cb);
-    exti_reg_callback(_motor_cfg[WALKINGMOTOR_R_ID].encoder[0].exti, EXTI_Trigger_Rising_Falling, encoder_r1_exti_cb);
-
-#if defined(CONFIG_MOTOR_ENCODER_NUM) && (CONFIG_MOTOR_ENCODER_NUM == 2)
-    GPIO_EXTILineConfig(GPIO_PortSource(_motor_cfg[WALKINGMOTOR_L_ID].encoder[1].port), _motor_cfg[WALKINGMOTOR_L_ID].encoder[1].exti);
-    GPIO_EXTILineConfig(GPIO_PortSource(_motor_cfg[WALKINGMOTOR_R_ID].encoder[1].port), _motor_cfg[WALKINGMOTOR_R_ID].encoder[1].exti);
-    exti_reg_callback(_motor_cfg[WALKINGMOTOR_L_ID].encoder[1].exti, EXTI_Trigger_Rising_Falling, encoder_l2_exti_cb);
-    exti_reg_callback(_motor_cfg[WALKINGMOTOR_R_ID].encoder[1].exti, EXTI_Trigger_Rising_Falling, encoder_r2_exti_cb);
-#endif
+    GPIO_EXTILineConfig(GPIO_PortSource(_motor_cfg[WALKINGMOTOR_L_ID].encoderA.port), _motor_cfg[WALKINGMOTOR_L_ID].encoderA.exti);
+    GPIO_EXTILineConfig(GPIO_PortSource(_motor_cfg[WALKINGMOTOR_R_ID].encoderA.port), _motor_cfg[WALKINGMOTOR_R_ID].encoderA.exti);
+    exti_reg_callback(_motor_cfg[WALKINGMOTOR_L_ID].encoderA.exti, EXTI_Trigger_Rising_Falling, encoder_LA_exti_cb); 
+    exti_reg_callback(_motor_cfg[WALKINGMOTOR_R_ID].encoderA.exti, EXTI_Trigger_Rising_Falling, encoder_RA_exti_cb); 
 }
+
 /*
- * 左右行走电机编码器初始化函数
+ * MOTOR ODOMETER INITIALIZATION
  */
 void init_walkingmotor_odometer(void)
 {
@@ -408,44 +390,30 @@ void init_walkingmotor_odometer(void)
     init_extix();
 }
 /*
- * 刷新行走电机的里程数据函数
+ * Refresh mileage data function of walking motor
  */
 static void _refresh_walkingmotor_odometer(_u32 durationMs)
 {
+  static _u32 lastTime = 0;
     _u8 cnt;
     float dist_mm;
     // disable interrupt :
-    _u32 irqSave = enter_critical_section();                                    //临界资源保护
-    for (cnt = 0; cnt < WALKINGMOTOR_CNT; ++cnt) {                       //得到这段时间内的编码器数据
-#ifdef CONFIG_MOTOR_ENCODER_FILTER
-        _encoder_filters[cnt][0].err = 0;
-        _encoder_filters[cnt][1].err = 0;
-#endif
-#if defined(CONFIG_MOTOR_ENCODER_NUM) && (CONFIG_MOTOR_ENCODER_NUM == 2)
-        if (_encoder1TicksDelta[cnt] > _encoder2TicksDelta[cnt] + 2) {
-            _encoder2TicksDelta[cnt] = _encoder1TicksDelta[cnt];
-        } else if (_encoder2TicksDelta[cnt] > _encoder1TicksDelta[cnt] + 2) {
-            _encoder1TicksDelta[cnt] = _encoder2TicksDelta[cnt];
-        }
-#endif
-
+    _u32 irqSave = enter_critical_section();     //disable interrupt
+    for (cnt = 0; cnt < WALKINGMOTOR_CNT; ++cnt) {//Get the encoder data during this time
         _lastEncoderTicksDelta[cnt] = _encoder1TicksDelta[cnt];
         _encoder1TicksDelta[cnt] = 0;
-
-#if defined(CONFIG_MOTOR_ENCODER_NUM) && (CONFIG_MOTOR_ENCODER_NUM == 2)
-        _lastEncoderTicksDelta[cnt] += _encoder2TicksDelta[cnt];
-        _encoder2TicksDelta[cnt] = 0;
-#endif
     }
     leave_critical_section(irqSave);
 
-    if (durationMs == 0)                                                        //防止除零
+    // Calculate odometry data
+    if (durationMs == 0) //just to avoid divide by zero error
         durationMs = 1;
 
-    for (cnt = 0; cnt < WALKINGMOTOR_CNT; ++cnt) {                       //根据这段时间内的编码器数据计算这段时间内速度，即当前速度
-        dist_mm = (float)_lastEncoderTicksDelta[cnt] * (1000.0/_motor_cfg[cnt].speed_factor);
+    for (cnt = 0; cnt < WALKINGMOTOR_CNT; ++cnt) {
+        //Calculate the speed during this period based on the encoder data 
+        dist_mm = (float)_lastEncoderTicksDelta[cnt] * (1000.0f/_motor_cfg[cnt].speed_factor);
 		
-        _lastOdometerSpeedAbs[cnt] = dist_mm * 1000.0 / durationMs;
+        _lastOdometerSpeedAbs[cnt] = fabsf(dist_mm * 1000.0f / durationMs);
 #ifdef CONFIG_MOTOR_PID_DEBUG
         if (_lastEncoderTicksDelta[cnt] > 0) {
 //            DBG_OUT("encoder[%d] = %d\r\n", cnt, (int)_lastEncoderTicksDelta[cnt]);
@@ -453,10 +421,17 @@ static void _refresh_walkingmotor_odometer(_u32 durationMs)
 #endif
 
         dist_mm += _motorDistTailing[cnt];
-        _motorDistAccumulated[cnt] += (_u32)dist_mm;
-        _motorDistTailing[cnt] = dist_mm - (_u32)dist_mm;
+        _motorDistAccumulated[cnt] += (_u32)fabsf(dist_mm);
+        _motorDistTailing[cnt] = dist_mm - (_s32)dist_mm;
 
         _motorDeltaTicks[cnt] += _lastEncoderTicksDelta[cnt];
+#ifdef CONFIG_MOTOR_PID_DEBUG
+        if (cnt == 0 && getms() - lastTime > 250) {
+          DBG_OUT("dist_mm = %d, _motorDeltaTicks = %d, _lastOdometerSpeedAbs = %d\r\n", 
+                  (int)dist_mm, (int)_motorDeltaTicks[cnt], (int)_lastOdometerSpeedAbs[cnt]);
+          lastTime = getms();
+        }
+#endif
     }
 
 }
@@ -479,14 +454,14 @@ _u32 walkingmotor_cumulate_rdist_mm(void)
 
 float walkingmotor_delta_ldist_mm_f(void)
 {
-    _u32 delta_dist = _motorDeltaTicks[WALKINGMOTOR_L_ID];
+    float delta_dist = _motorDeltaTicks[WALKINGMOTOR_L_ID];
     _motorDeltaTicks[WALKINGMOTOR_L_ID] = 0;
     return delta_dist * (1000.f / _motor_cfg[WALKINGMOTOR_L_ID].speed_factor);
 }
 
 float walkingmotor_delta_rdist_mm_f(void)
 {
-    _u32 delta_dist = _motorDeltaTicks[WALKINGMOTOR_R_ID];
+    float delta_dist = _motorDeltaTicks[WALKINGMOTOR_R_ID];
     _motorDeltaTicks[WALKINGMOTOR_R_ID] = 0;
     return delta_dist * (1000.f / _motor_cfg[WALKINGMOTOR_R_ID].speed_factor);
 }
@@ -514,13 +489,13 @@ static void _control_walkingmotor_speed_byid(int id)
 {
     const float PWM_OUT_MAX = CONFIG_MOTOR_PWM_PERIOD;
 
-    if (_motorSpeedMm[id] == 0) {                                               //设定速度为0，则立即停止行走电机
+    if (_motorSpeedMm[id] == 0) {                                               // Set the speed to 0, then stop the walking motor immediately
         _set_walkingmotor(id, 0, MOTOR_CTRL_STATE_BRAKE);
         speed_PWMOUT[id] = 0;
     } else {
         int desiredCtrl = (_motorSpeedMm[id] > 0) ? MOTOR_CTRL_STATE_FORWARD : MOTOR_CTRL_STATE_BACKWARD;
 
-        if (desiredCtrl != _motorCtrlStates[id]) {                              //方向改变，则先停止行走电机
+        if (desiredCtrl != _motorCtrlStates[id]) {                              // Direction change, stop the walking motor first
             stalldetector_enterBlindMode(id);
             if (_lastOdometerSpeedAbs[id] > 1.0f) {
                 _set_walkingmotor(id, 0, MOTOR_CTRL_STATE_BRAKE);
@@ -536,13 +511,13 @@ static void _control_walkingmotor_speed_byid(int id)
         speedErri[id] += speedCurrentErr;
         speedLastErr[id] = speedCurrentErr;
 
-        speed_PWMOUT[id] = (Kp * speedCurrentErr + Ki * speedErri[id] + Kd * speedCurrentErrd); //PID计算下一个PWM占空比值
+        speed_PWMOUT[id] = (Kp * speedCurrentErr + Ki * speedErri[id] + Kd * speedCurrentErrd); //PID calculates the next PWM duty cycle value
 #ifdef CONFIG_MOTOR_PID_DEBUG
         if (id == WALKINGMOTOR_L_ID) {
 //            DBG_OUT("%d, pwm %5d, vo %4d, vi %4d\r\n",
 //                    desiredCtrl, (int)speed_PWMOUT, (int)_lastOdometerSpeedAbs[id], _motorSpeedMm[id]);
-            DBG_OUT("%5d, %4d, %4d\r\n",
-                    (int)speed_PWMOUT[id], (int)_lastOdometerSpeedAbs[id], _motorSpeedMm[id]);
+            DBG_OUT("speedCurrentErr = %d, speedCurrentErrd = %d, pwm %d, motorSpeed %d\r\n",
+                    (int)speedCurrentErr, (int)speedCurrentErrd, (int)speed_PWMOUT[id], _motorSpeedMm[id]);
         }
 #endif
         if (speed_PWMOUT[id] > PWM_OUT_MAX)
@@ -550,7 +525,7 @@ static void _control_walkingmotor_speed_byid(int id)
         if (speed_PWMOUT[id] < 0)
             speed_PWMOUT[id] = 0;
 
-        _set_walkingmotor(id, (int) speed_PWMOUT[id], desiredCtrl);            //将PID计算得到的PWM占空比值设定
+        _set_walkingmotor(id, (int) speed_PWMOUT[id], desiredCtrl);            // Set the PWM duty cycle value calculated by PID
     }
 }
 /*
