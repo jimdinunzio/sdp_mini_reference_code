@@ -228,10 +228,8 @@ static void on_request_slamcore_cb(infra_channel_desc_t * channel)
     case SLAMWARECORECB_CMD_GET_BASE_BUMPER_DATA:
         {
             base_bumper_data_response_t ans_pkt;
-            ans_pkt.bumper_data = stalldetector_is_bumped();
-//            ans_pkt.bumper_data = get_bump_bitmap();
-            ans_pkt.bumper_data |= (get_distir_value()->bottomSensorBitmap << 2);
-//            ans_pkt.bumper_data |= 0xffffffff;
+            // use the bumper sensor data in the response.
+            ans_pkt.bumper_data = get_bump_bitmap();
             net_send_ans(channel, &ans_pkt, sizeof(base_bumper_data_response_t));
         }
         break;

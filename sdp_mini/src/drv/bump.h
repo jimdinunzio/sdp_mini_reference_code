@@ -31,6 +31,8 @@
 #pragma once
 #include "common/common.h"
 
+#define NUM_BUMP_SENSORS 3
+
 #define BUMP_GPIO       GPIOB
 #define BUMP_PIN_L      GPIO_Pin_5
 #define BUMP_PIN_R      GPIO_Pin_13

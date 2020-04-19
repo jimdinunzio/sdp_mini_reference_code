@@ -170,7 +170,7 @@ typedef struct _base_sensor_data_response
 
 typedef struct _base_bumper_data_response
 {
-    _u8  bumper_data;           //每一位代表一个bump传感器的状态，最多支持8个
+    _u8  bumper_data;           // Each bit represents the status of a bump sensor and supports up to 8
 } __attribute__((packed)) base_bumper_data_response_t;
 
 typedef struct _base_set_motor_request

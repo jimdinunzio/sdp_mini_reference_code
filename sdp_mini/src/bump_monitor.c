@@ -32,6 +32,7 @@
 #include "bump_monitor.h"
 #include "drv/bump.h"
 #include "drv/motor.h"
+#include "drv/beep.h"
 
 #define CONF_STALL_AUTO_CANCELLATION_DURATION  1000     //ms
 
@@ -80,6 +81,7 @@ _s32 heartbeat_bumpermonitor(void)
 {
     if (is_bumped()) {
         if (_stallMode == STALLMODE_IDLE) {
+            beep_beeper(3000, 100, 1);
             enter_stall_mode(STALLMODE_NO_FORWARD);
         }
     } else {
@@ -88,8 +90,8 @@ _s32 heartbeat_bumpermonitor(void)
     return 1;
 }
 /*
- * 设定速度的合法性判断函数
- * 具体是根据当前的碰撞状态
+ * Return 1 if requested speed is not allowed based on stall mode
+ * other wise return 0.
  */
 _s32 bumpermonitor_filter_motorcmd(_s32 spdLeft, _s32 spdRight)
 {

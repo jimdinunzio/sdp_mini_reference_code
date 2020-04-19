@@ -81,5 +81,5 @@ _u8 get_bump_bitmap(void)
  */
 _u8 is_bumped(void)
 {
-    return ((get_bump_bitmap() & 0x3) != 0x3);
+    return ((get_bump_bitmap() & 0x7) != 0x7);
 }

@@ -39,7 +39,7 @@
 #define WALKINGMOTOR_L_ID       0
 #define WALKINGMOTOR_R_ID       1
 
-#define CONFIG_MOTOR_PID_DEBUG      0
+//#define CONFIG_MOTOR_PID_DEBUG
 
 /**
  @brief motor driving port configures.
@@ -394,7 +394,6 @@ void init_walkingmotor_odometer(void)
  */
 static void _refresh_walkingmotor_odometer(_u32 durationMs)
 {
-  static _u32 lastTime = 0;
     _u8 cnt;
     float dist_mm;
     // disable interrupt :
@@ -416,7 +415,7 @@ static void _refresh_walkingmotor_odometer(_u32 durationMs)
         _lastOdometerSpeedAbs[cnt] = fabsf(dist_mm * 1000.0f / durationMs);
 #ifdef CONFIG_MOTOR_PID_DEBUG
         if (_lastEncoderTicksDelta[cnt] > 0) {
-//            DBG_OUT("encoder[%d] = %d\r\n", cnt, (int)_lastEncoderTicksDelta[cnt]);
+            DBG_OUT("encoder[%d] = %d\r\n", cnt, (int)_lastEncoderTicksDelta[cnt]);
         }
 #endif
 
@@ -514,8 +513,8 @@ static void _control_walkingmotor_speed_byid(int id)
         speed_PWMOUT[id] = (Kp * speedCurrentErr + Ki * speedErri[id] + Kd * speedCurrentErrd); //PID calculates the next PWM duty cycle value
 #ifdef CONFIG_MOTOR_PID_DEBUG
         if (id == WALKINGMOTOR_L_ID) {
-//            DBG_OUT("%d, pwm %5d, vo %4d, vi %4d\r\n",
-//                    desiredCtrl, (int)speed_PWMOUT, (int)_lastOdometerSpeedAbs[id], _motorSpeedMm[id]);
+            DBG_OUT("%d, pwm %5d, vo %4d, vi %4d\r\n",
+                    desiredCtrl, (int)speed_PWMOUT, (int)_lastOdometerSpeedAbs[id], _motorSpeedMm[id]);
             DBG_OUT("speedCurrentErr = %d, speedCurrentErrd = %d, pwm %d, motorSpeed %d\r\n",
                     (int)speedCurrentErr, (int)speedCurrentErrd, (int)speed_PWMOUT[id], _motorSpeedMm[id]);
         }
@@ -710,7 +709,7 @@ void stalldetector_heartbeat(void)
     }
 }
 /*
- * 获取堵转映射成碰撞状态
+ * Get the locked-rotation map into the collision state
  */
 _u8 stalldetector_is_bumped(void)
 {
