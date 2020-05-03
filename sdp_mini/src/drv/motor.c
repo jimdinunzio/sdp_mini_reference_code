@@ -83,9 +83,14 @@ static _s32 _motorSpeedMm[WALKINGMOTOR_CNT];                    //行走电机�
 //static const float Ki = 1.6;                   //PID 积分因子
 //static const float Kd = 0.0;                   //PID 微分因子
 
-static const float Kp = 1.0;                     //PID 比例因子
-static const float Ki = 0.4;                   //PID 积分因子
+static const float Kp = 1.5;                     //PID 比例因子
+static const float Ki = 0.6;                   //PID 积分因子
 static const float Kd = 0.0;                   //PID 微分因子
+
+// first 1.0, 0.4, 0.0
+// second 1.25, 0.6, 0.0
+// third 1.5, 0.8, 0.0
+// fourth 1.5 0.6 0.0
 
 static float speedLastErr[WALKINGMOTOR_CNT];
 static float speedErri[WALKINGMOTOR_CNT];
