@@ -55,8 +55,8 @@
 
 // the voltage scale factor to transform the voltage on the ADC pin to the actual battery voltage
 // it is controlled by the resistor network, please refer to the ref design schematic for details
-#define BATTERY_VOLTAGE_FULL    ((int)(11.2 * 1000)) //mV
-#define BATTERY_VOLTAGE_EMPTY   ((int)(7.2 * 1000)) //mV
+#define BATTERY_VOLTAGE_FULL    ((int)(12.0 * 1000)) //mV
+#define BATTERY_VOLTAGE_EMPTY   ((int)(7.0 * 1000)) //mV
 
 void init_battery(void);
 _u32 get_electricity(void);

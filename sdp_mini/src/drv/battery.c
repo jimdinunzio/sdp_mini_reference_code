@@ -32,6 +32,7 @@
 #include "battery.h"
 #include "beep.h"
 #include "utils/filters.h"
+#include <math.h>
 
 #define CONFIG_POWERSTATE_CHECK_DURATION       10       //单位：ms
 #define CONFIG_CHARGEBASE_REMOVAL_THRESHOLDTS  100      //单位：ms
@@ -175,7 +176,7 @@ static _s32 _battery_volume_calculate(void)
     }   else if (currentVolt > BATTERY_VOLTAGE_FULL) {
         percent = 100;
     } else {
-        percent = (currentVolt - BATTERY_VOLTAGE_EMPTY) * 100 / (BATTERY_VOLTAGE_FULL - BATTERY_VOLTAGE_EMPTY);
+        percent = (int)(100.0f * (-0.1700162f - (-0.005948003f / -0.3530656f) * (1.0f - expf(0.0003530656f * currentVolt))));
     }
     return percent;
 }
