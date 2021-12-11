@@ -136,7 +136,7 @@ void delay_alert(uint32_t ms)
 }
 
 /*
- * ADC采样启动函数
+ * ADC sampling start function
  */
 void adc_read_start(ADC_TypeDef * adc_dev, uint8_t ADC_Channel)
 {
@@ -150,7 +150,7 @@ void adc_read_start(ADC_TypeDef * adc_dev, uint8_t ADC_Channel)
 
 
 /*
- * 读取ADC采样值函数
+ * Read ADC sample value function
  */
 uint16_t adc_read_final(ADC_TypeDef * adc_dev)
 {
@@ -158,7 +158,7 @@ uint16_t adc_read_final(ADC_TypeDef * adc_dev)
     return adc_dev->DR;
 }
 /*
- * 等待ADC采样完成函数
+ * Waiting for ADC sampling to complete function
  */
 uint16_t adc_read_wait(ADC_TypeDef * adc_dev)
 {

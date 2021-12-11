@@ -32,11 +32,18 @@
 #include "common/common.h"
 
 
-#define HOCHARGE_DETECT         GPIO_Pin_10
 #define DCCHARGE_DETECT         GPIO_Pin_11
 #define BATT_FAULT              GPIO_Pin_4
 #define BATT_CHRG               GPIO_Pin_3
 #define BATT_READY              GPIO_Pin_2
+
+#define HOCHARGE_DETECT_PORT    GPIOA
+#define HOCHARGE_DETECT         GPIO_Pin_0 //PA0 ADC123_IN0
+#define HOCHARGE_ADC            1
+#define HOCHARGE_DETECT_ADC_CHN 0
+#define HOCHARGE_DETECT_ADC_REF 2495
+#define HOCHARGE_DETECT_ZERO    HOCHARGE_DETECT_ADC_REF / 2.0
+#define HOCHARGE_DETECT_UPDATE_DURATION 1000
 
 #define BATT_DETECT_PORT        GPIOA
 #define BATT_DETECT_PIN         GPIO_Pin_6

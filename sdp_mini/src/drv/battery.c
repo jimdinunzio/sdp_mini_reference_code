@@ -34,16 +34,17 @@
 #include "utils/filters.h"
 #include <math.h>
 
-#define CONFIG_POWERSTATE_CHECK_DURATION       10       //单位：ms
-#define CONFIG_CHARGEBASE_REMOVAL_THRESHOLDTS  100      //单位：ms
+#define CONFIG_POWERSTATE_CHECK_DURATION       10       //ms
+#define CONFIG_CHARGEBASE_REMOVAL_THRESHOLDTS  100      //ms
 static _u32 batteryFrequency = 0;
+static _u32 chargeFrequency = 0;
 static _u32 batteryElectricityCalibrate = 0;
 static _u32 batteryElectricityPercentage = 0;
 static _u8 chargeSound = 2;
 static _u8 isChargeInserted = 0;
 static _u8 chargeInsertedTs = 0;
-static _u8 isDcInserted = 0;
-static _u8 dcInsertedTs = 0;
+//static _u8 isDcInserted = 0;
+//static _u8 dcInsertedTs = 0;
 
 // avg filter queue for power supply sampling...
 #define PWR_FILTER_QUEUE_BIT    3
@@ -57,8 +58,34 @@ enum {
 };
 static _u8  _pwrAdcSampleState = 0;
 static void _battery_sample_batteryvoltage();
+
+#define CHARGE_FILTER_QUEUE_BIT    3
+#define CHARGE_FILTER_QUEUE_SIZE   (0x1<<CHARGE_FILTER_QUEUE_BIT)
+static _u16 _chargeCachedCurrentADCVal = 0;
+static _u16 _chargeFilterCurrentQueue[CHARGE_FILTER_QUEUE_SIZE+2];
+static _u8  _chargeFilterPos;
+enum {
+    CHARGE_ADC_STATE_IDLE = 0,
+    CHARGE_ADC_STATE_WAITING = 1,
+};
+static _u8  _chargeAdcSampleState = 0;
+static void _charge_sample_chargecurrent();
+
 /*
- * 电池容量ADC检测初始化函数
+ * charge ADC detection initialization function
+ */
+static void init_charge_current_detect(void)
+{
+    _chargeAdcSampleState = CHARGE_ADC_STATE_IDLE;
+    _chargeFilterPos = 0;
+    // preheat the adc avg-filter queue...
+    do{
+          _charge_sample_chargecurrent();
+      } while (_chargeFilterPos!=0);
+}
+
+/*
+ * Battery capacity ADC detection initialization function
  */
 static void init_electricity_detect(void)
 {
@@ -69,9 +96,30 @@ static void init_electricity_detect(void)
           _battery_sample_batteryvoltage();
       } while (_pwrFilterPos!=0);
 }
+
+// ACS712 outputs 2.5v for I=0, and here R1=R2=10K voltage divder divides it 
+// in half so V per A needs to be divided in half as well.
+#define ACS712_30A_V_PER_A 0.066 / 2.0 
+
 /*
- * 获取电池电压函数
- * 返回电压值，单位：mV
+ * Get charge current function
+ * Return current value, unit: mA
+ */
+_s32 get_charge_current(void)
+{
+    const _u32  ADC_LEVELS = (0x1<<ADC_RES_BIT) - 1; //4096
+    // ADC_REF = 2.495
+    // Vin = adc_val * ADC_REF / 4096
+    
+    const _u32 ADC_HOCHARGE_DETECT_ZERO = (_u32)(HOCHARGE_DETECT_ZERO * ADC_LEVELS / HOCHARGE_DETECT_ADC_REF);
+    const float ADC_TO_CHARGE_CURRENT_FACTOR = HOCHARGE_DETECT_ADC_REF / ADC_LEVELS / ACS712_30A_V_PER_A;      
+    const _u32  ADC_TO_CHARGE_CURRENT_FACTOR_fixQ10 = (_u32)(ADC_TO_CHARGE_CURRENT_FACTOR * 1024.0);
+    return ((_chargeCachedCurrentADCVal - ADC_HOCHARGE_DETECT_ZERO) * ADC_TO_CHARGE_CURRENT_FACTOR_fixQ10)>>10;
+}
+
+/*
+ * Get battery voltage function
+ * Return voltage value, unit: mV
  */
 _u32 get_electricity(void)
 {
@@ -83,15 +131,15 @@ _u32 get_electricity(void)
   return (_pwrCachedBattVoltADCVal * ADC_TO_BATT_VOLT_FACTOR_fixQ10)>>10;
 }
 /*
- * 获取电池容量百分比函数
- * 返回百分比0-100%
+ * Get battery capacity percentage function
+ * Return percentage 0-100%
  */
 _u8 get_electricitypercentage(void)
 {
     return batteryElectricityPercentage;
 }
 /*
- * 电池充电电平检测初始化函数
+ * Battery charge level detection initialization function
  */
 static void init_charge_detect(void)
 {
@@ -107,9 +155,9 @@ static void init_charge_detect(void)
 
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
 
-    GPIO_InitStructure.GPIO_Pin   = HOCHARGE_DETECT | DCCHARGE_DETECT;
+    GPIO_InitStructure.GPIO_Pin   = HOCHARGE_DETECT;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_10MHz;
-    GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_IN_FLOATING;
+    GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_AIN;
     GPIO_Init(GPIOB, &GPIO_InitStructure);
 
     GPIO_InitStructure.GPIO_Pin   = BATT_DETECT_PIN;
@@ -118,31 +166,58 @@ static void init_charge_detect(void)
     GPIO_Init(BATT_DETECT_PORT, &GPIO_InitStructure);
 }
 /*
- * 电池充电状态检测函数
- * 返回正在充电或不在充电状态
+ * Battery charge status detection function
+ * Return to charging or not charging state
  */
 _u8 charge_detect_getstatus(void)
 {
-    if ((isChargeInserted || isDcInserted) && (0 == GPIO_ReadInputDataBit(GPIOE, BATT_READY))) {
+    if (isChargeInserted && (0 == GPIO_ReadInputDataBit(GPIOE, BATT_READY))) {
         return ISCHARGE_CHRG;
     } else {
         return ISCHARGE_NOCHRG;
     }
 }
+#if 0
 /*
- * 获取电池DC电源插头充电状态函数
+ * Get the battery DC power plug charging status function
  */
 _s8 get_dc_charge_status(void)
 {
     return isDcInserted;
 }
+#endif
 /*
- * 获取电池充电桩充电状态函数
+ * Get the charging status function of the battery charging pile
  */
 _s8 get_home_charge_status(void)
 {
     return isChargeInserted;
 }
+
+static void _on_charge_adc_data_ready(_u16 adcData)
+{
+    _chargeCachedCurrentADCVal = add_to_avg_filter_u16(adcData, _chargeFilterCurrentQueue, _chargeFilterPos, CHARGE_FILTER_QUEUE_SIZE);
+    if ( (++_chargeFilterPos) >= CHARGE_FILTER_QUEUE_SIZE) {
+        _chargeFilterPos = 0;
+    }
+}
+
+static void _charge_sample_chargecurrent()
+{
+    switch (_chargeAdcSampleState) {
+    case CHARGE_ADC_STATE_IDLE:
+        adc_read_start(GET_ADC(HOCHARGE_ADC), HOCHARGE_DETECT_ADC_CHN);
+        _chargeAdcSampleState = CHARGE_ADC_STATE_WAITING;
+        break;
+    case CHARGE_ADC_STATE_WAITING:
+        if (adc_read_is_ready(GET_ADC(HOCHARGE_ADC))) {
+            _on_charge_adc_data_ready(adc_read_final(GET_ADC(HOCHARGE_ADC)));
+            _chargeAdcSampleState = CHARGE_ADC_STATE_IDLE;
+        }
+        break;
+    }
+}
+
 static void _on_battery_adc_data_ready(_u16 adcData)
 {
     _pwrCachedBattVoltADCVal = add_to_avg_filter_u16(adcData, _pwrFilterBattVoltQueue, _pwrFilterPos, PWR_FILTER_QUEUE_SIZE);
@@ -176,7 +251,8 @@ static _s32 _battery_volume_calculate(void)
     }   else if (currentVolt > BATTERY_VOLTAGE_FULL) {
         percent = 100;
     } else {
-        percent = (int)(100.0f * (-0.1700162f - (-0.005948003f / -0.3530656f) * (1.0f - expf(0.0003530656f * currentVolt))));
+        percent = (int)(100.0f * (-0.1700162f - (-0.005948003f / -0.3530656f) 
+                                  * (1.0f - expf(0.0003530656f * currentVolt))));
     }
     return percent;
 }
@@ -190,13 +266,13 @@ static void _battery_volume_update(void)
         if (percent >= batteryElectricityPercentage) {
             return ;
         }
-        percent = batteryElectricityPercentage - 1;
+        // percent = batteryElectricityPercentage - 1;
     } else {
         /* Charging. Volume is always getting up. */
         if (percent <= batteryElectricityPercentage) {
             return ;
         }
-        percent = batteryElectricityPercentage + 1;
+        // percent = batteryElectricityPercentage + 1;
     }
 
     if (percent < 0) {
@@ -208,18 +284,19 @@ static void _battery_volume_update(void)
 }
 
 /*
- * 电池相关初始化函数
- * 初始化电池容量检测
- * 初始化电池充电检测
+ * Battery related initialization function
+ * Initialize battery capacity detection
+ * Initialize battery charge detection
  */
 void init_battery(void)
 {
     init_electricity_detect();
+    init_charge_current_detect();
     init_charge_detect();
 }
 /*
- * 电池相关模块函数
- * 充电状态的判定等
+ * Battery related module functions
+ * Judgment of charging status, etc.
  */
 void heartbeat_battery(void)
 {
@@ -238,18 +315,16 @@ void heartbeat_battery(void)
 
     _battery_sample_batteryvoltage();
     if ((getms() - batteryFrequency) >= BATT_VOLUME_UPDATE_DURATION) {
-        //3秒检测一次电池容量及计算百分比
+        // Detect battery capacity and calculate percentage every 30 seconds
         batteryFrequency = getms();
 
-        //检测电池容量及计算百分比
+        //Check battery capacity and calculate percentage
         _battery_volume_update();
         DBG_OUT("Battery voltage %d%%, %dmv.\r\n", batteryElectricityPercentage, get_electricity());
 
-
         if (batteryElectricityPercentage < 15 && ISCHARGE_CHRG != charge_detect_getstatus()) {
             {
-
-//                beep_beeper(3000, 400, chargeSound);
+                beep_beeper(3000, 400, chargeSound);
                 if ((chargeSound += 1) >= 250) {
                     chargeSound = 250;
                 }
@@ -258,11 +333,17 @@ void heartbeat_battery(void)
             chargeSound = 2;
         }
     }
-#if 0
+
+    _charge_sample_chargecurrent();
+    if ((getms() - chargeFrequency) >= HOCHARGE_DETECT_UPDATE_DURATION) {
+      DBG_OUT("Charge current %dma.\r\n", get_charge_current());
+      chargeFrequency = getms();
+    }
     if (isChargeInserted) {
-        //是否处在充电桩充电状态
-        if (!PIN_READ(GPIOB, HOCHARGE_DETECT)) {
-            //在充电桩充电下：检测是否脱离充电桩，拔出则更改充电桩充电状态
+        //Whether it is in the charging state of the charging pile
+        if (abs(get_charge_current()) < 100) {
+            //under charging pile charging: detect whether it is detached from the charging pile,
+            //and change the charging state of the charging pile after pulling it out
             if (getms() - chargeInsertedTs >= CONFIG_CHARGEBASE_REMOVAL_THRESHOLDTS) {
                 beep_beeper(5000, 80, 2);
                 isChargeInserted = 0;
@@ -272,20 +353,24 @@ void heartbeat_battery(void)
         }
 
     } else {
-        //不在充电桩充电下：检测是否脱离充电桩，插入则更改充电桩充电状态
-        if (PIN_READ(GPIOB, HOCHARGE_DETECT)) {
+        // Not under charging from the charging station: check whether it is
+        // detached from the charging station, and change the charging status of
+        // the charging station when it is inserted
+        if (get_charge_current() < -100) {
             isChargeInserted = 1;
             beep_beeper(5000, 80, 2);
             chargeInsertedTs = getms();
         }
-
+ 
     }
+#if 0
     if (isDcInserted) {
-        //是否处在DC电源充电状态
+        //Whether it is in DC power charging state
         if (!PIN_READ(GPIOB, DCCHARGE_DETECT)) {
-            //在DC电源充电下：检测是否拔出DC电源，拔出则更改DC电源充电状态
+            //Under DC power charging: check whether the DC power is unplugged, 
+            // and change the charging state of the DC power if unplugged
             if (getms() - dcInsertedTs >= CONFIG_CHARGEBASE_REMOVAL_THRESHOLDTS * 2) {
-                //防抖动
+                //Anti-bounce
                 isDcInserted = 0;
             }
         } else {
@@ -293,7 +378,8 @@ void heartbeat_battery(void)
         }
 
     } else {
-        //不在DC电源充电下：检测DC电源是否插入，插入则更改DC电源充电状态
+        //Not under DC power charging: detect whether the DC power is plugged in,
+        // and change the charging state of the DC power when plugged in
         if (PIN_READ(GPIOB, DCCHARGE_DETECT)) {
             isDcInserted = 1;
             dcInsertedTs = getms();

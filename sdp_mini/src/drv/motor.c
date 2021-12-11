@@ -294,10 +294,10 @@ void init_walkingmotor(void)
     GPIO_PinRemapConfig(GPIO_FullRemap_TIM1, ENABLE);
     GPIO_PinRemapConfig(GPIO_Remap_TIM4, DISABLE);
 
-    /* Power on the motor */
+    /* Power on the motor for SDP-Mini motor controller*/
     // this turns on "CURRENT_SET" on J21-9, needed to get motor drive power
-    pinMode(MOTO_EN_PORT, MOTO_EN_PIN, GPIO_Mode_Out_PP, GPIO_Speed_50MHz);
-    pinSet(MOTO_EN_PORT,  MOTO_EN_PIN, Bit_SET);
+    //pinMode(MOTO_EN_PORT, MOTO_EN_PIN, GPIO_Mode_Out_PP, GPIO_Speed_50MHz);
+    //pinSet(MOTO_EN_PORT,  MOTO_EN_PIN, Bit_SET);
 
     for (i = 0; i < _countof(_motor_cfg); i++) {
         _init_motor_pwm(&_motor_cfg[i].pwm);
@@ -586,7 +586,7 @@ void brake_walkingmotor(void)
     _set_walkingmotor(WALKINGMOTOR_R_ID, 0, MOTOR_CTRL_STATE_BRAKE);
 }
 /*
- * 机器人是否在地上检测初始化函数
+ * Whether the robot is on the ground to detect the initialization function
  */
 void init_ontheground_detect(void)
 {
@@ -598,7 +598,7 @@ void init_ontheground_detect(void)
     GPIO_Init(ONGROUND_GPIO, &GPIO_InitStructure);
 }
 /*
- * 机器人是否在地上检测函数
+ * Whether the robot is on the ground detection function
  */
 _u8 is_ontheground(void)
 {

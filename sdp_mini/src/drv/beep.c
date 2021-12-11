@@ -110,14 +110,14 @@ static void stop_beep(void)
 
 static _u32 HighFrequency[] = { 0, 1046, 1175, 1318, 1397, 1568, 1760, 1976 };          //高频发声
 /*
- * 蜂鸣器PWM频率设置函数
+ * Buzzer PWM frequency setting function
  */
 static void set_beep_frequency(_u32 frequency)
 {
     TIM2->PSC = CPU_FREQ / TIME_PRESCALER / frequency;
 }
 /*
- * 蜂鸣器PWM脉宽设置函数
+ * Buzzer PWM pulse width setting function
  */
 static void set_beep_sound(_u32 sound)
 {

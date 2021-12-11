@@ -191,7 +191,7 @@ static void on_request_slamcore_cb(infra_channel_desc_t * channel)
             ans_pkt.power_status = PowerStatusNone;
             ans_pkt.power_status |= (charge_detect_getstatus() == ISCHARGE_CHRG) ? PowerStatusCharging : PowerStatusNone;
             ans_pkt.power_status |= get_home_charge_status() ? PowerStatusOnChargingDock : PowerStatusNone;
-            ans_pkt.power_status |= get_dc_charge_status() ? PowerStatusDcConnected : PowerStatusNone;
+//            ans_pkt.power_status |= get_dc_charge_status() ? PowerStatusDcConnected : PowerStatusNone;
             ans_pkt.battery_percentage = get_electricitypercentage();
             net_send_ans(channel, &ans_pkt, sizeof(base_status_response_t));
         }

@@ -32,9 +32,9 @@
 #include "utils/filters.h"
 
 /*
- * 平均滤波函数
- * 将新数据放入滤波器再求平均
- * 数据类型：unsigned short
+ * Average filter function
+ * Put the new data into the filter and average
+ * Data type: unsigned short
  */
 _u16 add_to_avg_filter_u16(_u16 new_data, _u16 * filter, size_t pos, size_t size)
 {
