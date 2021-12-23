@@ -378,9 +378,11 @@ void heartbeat_battery(void)
 
         //Check battery capacity and calculate percentage
         _battery_volume_update();
-        DBG_OUT("%d: Battery voltage %d%%, %dmv.\r\n", getms(), 
-          batteryElectricityPercentage, get_electricity());
-        if (batteryElectricityPercentage < 15 && ISCHARGE_CHRG != charge_detect_getstatus()) {
+        bool isCharging = ISCHARGE_CHRG == charge_detect_getstatus();
+        DBG_OUT("%d: Battery voltage %d%%, %dmv%s.\r\n", getms(), 
+          batteryElectricityPercentage, get_electricity(), isCharging ?
+            " [Charging]" : "");
+        if (batteryElectricityPercentage < 15 && !isCharging) {
             {
                 //beep_beeper(3000, 400, chargeSound);
                 if ((chargeSound += 1) >= 250) {
