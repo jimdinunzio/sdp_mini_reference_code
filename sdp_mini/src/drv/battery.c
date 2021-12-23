@@ -36,19 +36,24 @@
 
 #define CONFIG_POWERSTATE_CHECK_DURATION       10       //ms
 #define CONFIG_CHARGEBASE_REMOVAL_THRESHOLDTS  100      //ms
+
 static _u32 batteryFrequency = 0;
+static _u32 batterySampleFrequency = 0;
 static _u32 chargeFrequency = 0;
 static _u32 batteryElectricityCalibrate = 0;
+static _u32 chargeCurrentCalibrate = 0;
 static _u32 batteryElectricityPercentage = 0;
 static _u8 chargeSound = 2;
 static _u8 isChargeInserted = 0;
-static _u8 chargeInsertedTs = 0;
+static _s16 chargeDetectZero = 2047;
+
+static _s32 lastChargeCurrent = 0;
+
 //static _u8 isDcInserted = 0;
 //static _u8 dcInsertedTs = 0;
 
 // avg filter queue for power supply sampling...
-#define PWR_FILTER_QUEUE_BIT    3
-#define PWR_FILTER_QUEUE_SIZE   (0x1<<PWR_FILTER_QUEUE_BIT)
+#define PWR_FILTER_QUEUE_SIZE  10
 static _u16 _pwrCachedBattVoltADCVal = 0;
 static _u16 _pwrFilterBattVoltQueue[PWR_FILTER_QUEUE_SIZE+2];
 static _u8  _pwrFilterPos;
@@ -59,8 +64,7 @@ enum {
 static _u8  _pwrAdcSampleState = 0;
 static void _battery_sample_batteryvoltage();
 
-#define CHARGE_FILTER_QUEUE_BIT    3
-#define CHARGE_FILTER_QUEUE_SIZE   (0x1<<CHARGE_FILTER_QUEUE_BIT)
+#define CHARGE_FILTER_QUEUE_SIZE   10
 static _u16 _chargeCachedCurrentADCVal = 0;
 static _u16 _chargeFilterCurrentQueue[CHARGE_FILTER_QUEUE_SIZE+2];
 static _u8  _chargeFilterPos;
@@ -71,6 +75,13 @@ enum {
 static _u8  _chargeAdcSampleState = 0;
 static void _charge_sample_chargecurrent();
 
+enum {
+  ADC_BATTERY_DETECT = 0,
+  ADC_CHARGE_CURRENT = 1,
+};
+
+static _u8 _currentAdcRead = 1;
+
 /*
  * charge ADC detection initialization function
  */
@@ -79,9 +90,14 @@ static void init_charge_current_detect(void)
     _chargeAdcSampleState = CHARGE_ADC_STATE_IDLE;
     _chargeFilterPos = 0;
     // preheat the adc avg-filter queue...
-    do{
-          _charge_sample_chargecurrent();
-      } while (_chargeFilterPos!=0);
+    _charge_sample_chargecurrent();
+    while (_chargeFilterPos == 0) {
+      _charge_sample_chargecurrent();
+    }
+    do {
+      _charge_sample_chargecurrent();
+    } while (_chargeFilterPos!=0);
+    DBG_OUT("preheat charge current queue avg = %d.\r\n", _chargeCachedCurrentADCVal);
 }
 
 /*
@@ -92,14 +108,19 @@ static void init_electricity_detect(void)
     _pwrAdcSampleState = BATTERY_ADC_STATE_IDLE;
     _pwrFilterPos = 0;
     // preheat the adc avg-filter queue...
-    do{
-          _battery_sample_batteryvoltage();
-      } while (_pwrFilterPos!=0);
+    _battery_sample_batteryvoltage();
+    while (_pwrFilterPos == 0) {
+      _battery_sample_batteryvoltage();
+    }
+    do {
+      _battery_sample_batteryvoltage();
+    } while (_pwrFilterPos!=0);
+    DBG_OUT("preheat battery voltage queue avg = %d.\r\n", _pwrCachedBattVoltADCVal);
 }
 
 // ACS712 outputs 2.5v for I=0, and here R1=R2=10K voltage divder divides it 
-// in half so V per A needs to be divided in half as well.
-#define ACS712_30A_V_PER_A 0.066 / 2.0 
+// in half to 1.25v for I=0. V per A needs to be divided in half as well.
+#define ACS712_05A_V_PER_A (0.185 / 2.0)
 
 /*
  * Get charge current function
@@ -107,14 +128,13 @@ static void init_electricity_detect(void)
  */
 _s32 get_charge_current(void)
 {
-    const _u32  ADC_LEVELS = (0x1<<ADC_RES_BIT) - 1; //4096
+    const _u32  ADC_LEVELS = (0x1<<ADC_RES_BIT) - 1; //4095
     // ADC_REF = 2.495
     // Vin = adc_val * ADC_REF / 4096
     
-    const _u32 ADC_HOCHARGE_DETECT_ZERO = (_u32)(HOCHARGE_DETECT_ZERO * ADC_LEVELS / HOCHARGE_DETECT_ADC_REF);
-    const float ADC_TO_CHARGE_CURRENT_FACTOR = HOCHARGE_DETECT_ADC_REF / ADC_LEVELS / ACS712_30A_V_PER_A;      
-    const _u32  ADC_TO_CHARGE_CURRENT_FACTOR_fixQ10 = (_u32)(ADC_TO_CHARGE_CURRENT_FACTOR * 1024.0);
-    return ((_chargeCachedCurrentADCVal - ADC_HOCHARGE_DETECT_ZERO) * ADC_TO_CHARGE_CURRENT_FACTOR_fixQ10)>>10;
+    const float ADC_TO_CHARGE_CURRENT_FACTOR = (float)HOCHARGE_DETECT_ADC_REF / ADC_LEVELS / ACS712_05A_V_PER_A;      
+    const _s32  ADC_TO_CHARGE_CURRENT_FACTOR_fixQ10 = (_s32)(ADC_TO_CHARGE_CURRENT_FACTOR * 1024.0);
+    return (_s32)(((_s32)_chargeCachedCurrentADCVal - chargeDetectZero) * ADC_TO_CHARGE_CURRENT_FACTOR_fixQ10) / 1024;
 }
 
 /*
@@ -123,7 +143,7 @@ _s32 get_charge_current(void)
  */
 _u32 get_electricity(void)
 {
-    const _u32  ADC_LEVELS = (0x1<<ADC_RES_BIT); //4096
+    const _u32  ADC_LEVELS = (0x1<<ADC_RES_BIT) - 1; //4095
   //  ADC_REF = 2.495
   //  VBATT / BATT_DETECT_ADC_RATIO = adc_val * ADC_REF / 4096
   const float ADC_TO_BATT_VOLT_FACTOR = (BATT_DETECT_ADC_REF * BATT_DETECT_ADC_RATIO) / ADC_LEVELS;
@@ -153,17 +173,12 @@ static void init_charge_detect(void)
     GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_IPU;
     GPIO_Init(GPIOE, &GPIO_InitStructure);
 
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
-
-    GPIO_InitStructure.GPIO_Pin   = HOCHARGE_DETECT;
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
+    
+    GPIO_InitStructure.GPIO_Pin = HOCHARGE_DETECT_PIN | BATT_DETECT_PIN;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_10MHz;
     GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_AIN;
-    GPIO_Init(GPIOB, &GPIO_InitStructure);
-
-    GPIO_InitStructure.GPIO_Pin   = BATT_DETECT_PIN;
-    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_10MHz;
-    GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_AIN;
-    GPIO_Init(BATT_DETECT_PORT, &GPIO_InitStructure);
+    GPIO_Init(BATT_AND_CHARGE_DETECT_PORT, &GPIO_InitStructure);
 }
 /*
  * Battery charge status detection function
@@ -171,7 +186,7 @@ static void init_charge_detect(void)
  */
 _u8 charge_detect_getstatus(void)
 {
-    if (isChargeInserted && (0 == GPIO_ReadInputDataBit(GPIOE, BATT_READY))) {
+    if (isChargeInserted) {
         return ISCHARGE_CHRG;
     } else {
         return ISCHARGE_NOCHRG;
@@ -196,7 +211,8 @@ _s8 get_home_charge_status(void)
 
 static void _on_charge_adc_data_ready(_u16 adcData)
 {
-    _chargeCachedCurrentADCVal = add_to_avg_filter_u16(adcData, _chargeFilterCurrentQueue, _chargeFilterPos, CHARGE_FILTER_QUEUE_SIZE);
+    _chargeCachedCurrentADCVal = add_to_avg_filter_u16(adcData, 
+      _chargeFilterCurrentQueue, _chargeFilterPos, CHARGE_FILTER_QUEUE_SIZE);
     if ( (++_chargeFilterPos) >= CHARGE_FILTER_QUEUE_SIZE) {
         _chargeFilterPos = 0;
     }
@@ -220,7 +236,8 @@ static void _charge_sample_chargecurrent()
 
 static void _on_battery_adc_data_ready(_u16 adcData)
 {
-    _pwrCachedBattVoltADCVal = add_to_avg_filter_u16(adcData, _pwrFilterBattVoltQueue, _pwrFilterPos, PWR_FILTER_QUEUE_SIZE);
+    _pwrCachedBattVoltADCVal = add_to_avg_filter_u16(adcData, 
+      _pwrFilterBattVoltQueue, _pwrFilterPos, PWR_FILTER_QUEUE_SIZE);
     if ( (++_pwrFilterPos) >= PWR_FILTER_QUEUE_SIZE) {
         _pwrFilterPos = 0;
     }
@@ -266,13 +283,13 @@ static void _battery_volume_update(void)
         if (percent >= batteryElectricityPercentage) {
             return ;
         }
-        // percent = batteryElectricityPercentage - 1;
+        percent = batteryElectricityPercentage - 1;
     } else {
         /* Charging. Volume is always getting up. */
         if (percent <= batteryElectricityPercentage) {
             return ;
         }
-        // percent = batteryElectricityPercentage + 1;
+        percent = batteryElectricityPercentage + 1;
     }
 
     if (percent < 0) {
@@ -290,9 +307,10 @@ static void _battery_volume_update(void)
  */
 void init_battery(void)
 {
+    init_charge_detect();
     init_electricity_detect();
     init_charge_current_detect();
-    init_charge_detect();
+    chargeFrequency = getms();
 }
 /*
  * Battery related module functions
@@ -300,31 +318,71 @@ void init_battery(void)
  */
 void heartbeat_battery(void)
 {
-    if (!batteryElectricityCalibrate) {
-        _battery_sample_batteryvoltage();
+    if (!chargeCurrentCalibrate) {
+        _charge_sample_chargecurrent();
 
-        if ((getms() - batteryFrequency) >= BATT_VOLUME_CALIBRATING_DURATION) {
-            batteryElectricityPercentage = _battery_volume_calculate();
-            batteryElectricityCalibrate = true;
-            batteryFrequency = getms();
-            DBG_OUT("Battery calibration done, voltage %d, volume %d.\r\n",
-                    get_electricity(), batteryElectricityPercentage);
+        if ((getms() - chargeFrequency) >= CHARGE_CURRENT_CALIBRATING_DURATION) {
+            while (_chargeAdcSampleState != CHARGE_ADC_STATE_IDLE) { // wait until last read is finished
+              _charge_sample_chargecurrent();
+            }
+            chargeCurrentCalibrate = true;
+            chargeDetectZero = _chargeCachedCurrentADCVal;
+            batteryFrequency = getms();            
+            DBG_OUT("Charge current calibration done, charge detect zero = %d/4095 or %dmv current = %d.\r\n",
+                    chargeDetectZero, chargeDetectZero * HOCHARGE_DETECT_ADC_REF / 4095, get_charge_current());
         }
         return ;
     }
 
-    _battery_sample_batteryvoltage();
+    if (!batteryElectricityCalibrate) {
+        _battery_sample_batteryvoltage();
+
+        if ((getms() - batteryFrequency) >= BATT_VOLUME_CALIBRATING_DURATION) {
+            while (_pwrAdcSampleState != BATTERY_ADC_STATE_IDLE) { // wait until last read is finished
+              _battery_sample_batteryvoltage();
+            }          
+            batteryElectricityPercentage = _battery_volume_calculate();
+            batteryElectricityCalibrate = true;
+            batteryFrequency = getms();
+            chargeFrequency = getms();
+            batterySampleFrequency = getms();
+
+            DBG_OUT("Battery calibration done, voltage %d, volume %d.\r\n",
+                    get_electricity(), batteryElectricityPercentage);
+            lastChargeCurrent = get_charge_current();
+
+        }
+        return ;
+    }
+
+    if (_currentAdcRead == ADC_CHARGE_CURRENT) {
+      _charge_sample_chargecurrent();
+      if (_chargeAdcSampleState == CHARGE_ADC_STATE_IDLE && 
+          getms() - batterySampleFrequency >= BATT_SAMPLE_DURATION) {
+        batterySampleFrequency = getms();
+        _currentAdcRead = ADC_BATTERY_DETECT;  
+      }
+    }
+    if (_currentAdcRead == ADC_BATTERY_DETECT) {
+      _battery_sample_batteryvoltage();
+      if (_pwrAdcSampleState == BATTERY_ADC_STATE_IDLE)
+      {
+        _currentAdcRead = ADC_CHARGE_CURRENT;
+      }
+    }
+
+    // Check battery percentage
     if ((getms() - batteryFrequency) >= BATT_VOLUME_UPDATE_DURATION) {
         // Detect battery capacity and calculate percentage every 30 seconds
         batteryFrequency = getms();
 
         //Check battery capacity and calculate percentage
         _battery_volume_update();
-        DBG_OUT("Battery voltage %d%%, %dmv.\r\n", batteryElectricityPercentage, get_electricity());
-
+        DBG_OUT("%d: Battery voltage %d%%, %dmv.\r\n", getms(), 
+          batteryElectricityPercentage, get_electricity());
         if (batteryElectricityPercentage < 15 && ISCHARGE_CHRG != charge_detect_getstatus()) {
             {
-                beep_beeper(3000, 400, chargeSound);
+                //beep_beeper(3000, 400, chargeSound);
                 if ((chargeSound += 1) >= 250) {
                     chargeSound = 250;
                 }
@@ -333,35 +391,35 @@ void heartbeat_battery(void)
             chargeSound = 2;
         }
     }
-
-    _charge_sample_chargecurrent();
+    
+    // Check if commenced or stopped charging 
     if ((getms() - chargeFrequency) >= HOCHARGE_DETECT_UPDATE_DURATION) {
-      DBG_OUT("Charge current %dma.\r\n", get_charge_current());
+        //DBG_OUT("Charge ADC out avg: %d = %dmv\r\n", _chargeCachedCurrentADCVal, _chargeCachedCurrentADCVal * HOCHARGE_DETECT_ADC_REF / 4095 );
+        //DBG_OUT("Charge current %dma.\r\n", get_charge_current());
       chargeFrequency = getms();
-    }
-    if (isChargeInserted) {
-        //Whether it is in the charging state of the charging pile
-        if (abs(get_charge_current()) < 100) {
+
+      _s32 current = get_charge_current();
+      //DBG_OUT("%d: Volts = %d, I = %d\r\n",getms(), _chargeCachedCurrentADCVal * HOCHARGE_DETECT_ADC_REF / 4095, current);
+      if (isChargeInserted) {
+          //Whether it is in the charging state of the charging pile
+          if (current > lastChargeCurrent + 800) { 
             //under charging pile charging: detect whether it is detached from the charging pile,
             //and change the charging state of the charging pile after pulling it out
-            if (getms() - chargeInsertedTs >= CONFIG_CHARGEBASE_REMOVAL_THRESHOLDTS) {
-                beep_beeper(5000, 80, 2);
-                isChargeInserted = 0;
-            }
-        } else {
-            chargeInsertedTs = getms();
-        }
-
-    } else {
-        // Not under charging from the charging station: check whether it is
-        // detached from the charging station, and change the charging status of
-        // the charging station when it is inserted
-        if (get_charge_current() < -100) {
-            isChargeInserted = 1;
-            beep_beeper(5000, 80, 2);
-            chargeInsertedTs = getms();
-        }
- 
+             DBG_OUT("DETACH from charger detected current %dma.\r\n", get_charge_current());
+             isChargeInserted = 0;
+             beep_beeper(5000, 80, 2);
+          }
+      }
+      else { // !isChargeInserted
+        // Not under charging from the charging station: check whether it 
+        // has made contact and started charging
+        if (current < lastChargeCurrent - 800) { // count sequential - monotonic samples in current
+          isChargeInserted = 1;
+          beep_beeper(5000, 80, 2);
+          DBG_OUT("ATTACH to charger detected, current %dma.\r\n", get_charge_current());
+        } 
+      }      
+      lastChargeCurrent = current;
     }
 #if 0
     if (isDcInserted) {

@@ -37,16 +37,17 @@
 #define BATT_CHRG               GPIO_Pin_3
 #define BATT_READY              GPIO_Pin_2
 
-#define HOCHARGE_DETECT_PORT    GPIOA
-#define HOCHARGE_DETECT         GPIO_Pin_0 //PA0 ADC123_IN0
+#define BATT_AND_CHARGE_DETECT_PORT        GPIOA
+
+#define HOCHARGE_DETECT_PIN     GPIO_Pin_0 //PA0 ADC123_IN0
 #define HOCHARGE_ADC            1
 #define HOCHARGE_DETECT_ADC_CHN 0
 #define HOCHARGE_DETECT_ADC_REF 2495
-#define HOCHARGE_DETECT_ZERO    HOCHARGE_DETECT_ADC_REF / 2.0
-#define HOCHARGE_DETECT_UPDATE_DURATION 1000
 
-#define BATT_DETECT_PORT        GPIOA
-#define BATT_DETECT_PIN         GPIO_Pin_6
+#define CHARGE_CURRENT_CALIBRATING_DURATION 3000
+#define HOCHARGE_DETECT_UPDATE_DURATION 100
+
+#define BATT_DETECT_PIN         GPIO_Pin_6 //PA6 ADC12_IN6
 #define BATT_DETECT_ADC         1
 #define BATT_DETECT_ADC_CHN     6
 #define BATT_DETECT_ADC_RATIO   11.0f
@@ -58,8 +59,8 @@
 #define ISCHARGE_COMPLETE         0x3
 
 #define BATT_VOLUME_CALIBRATING_DURATION 5000   /* Volume calibrating duration, in ms. */
+#define BATT_SAMPLE_DURATION 30000 / 10
 #define BATT_VOLUME_UPDATE_DURATION      30000  /* Volume updating duration, in ms. */
-
 // the voltage scale factor to transform the voltage on the ADC pin to the actual battery voltage
 // it is controlled by the resistor network, please refer to the ref design schematic for details
 #define BATTERY_VOLTAGE_FULL    ((int)(12.0 * 1000)) //mV

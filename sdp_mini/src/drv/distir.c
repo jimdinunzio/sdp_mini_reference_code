@@ -201,19 +201,19 @@ static int init_dev_irdetector()
     return 1;
 }
 /*
- * 红外测距ADC轮训采样函数
+ * Infrared ranging ADC training sampling function 
  */
 static void heartbeat_dev_irdetector()
 {
     switch (_irWorkingStatus) {
-    case STATUS_WAIT:                                                           //等待红外PWM发送时间，再进行采样。一般是在采背景值之后发出PWM
+    case STATUS_WAIT:                                                           //Wait for the infrared PWM sending time before sampling. Generally, PWM is issued after the background value is collected 
         {
             if (getms() - _irLastSampleTime > IR_CARRIER_EMIT_WIDTH) {
                 _irWorkingStatus = STATUS_ADC_IDLE;
             }
         }
         break;
-    case STATUS_ADC_IDLE:                                                       //可以进行采样时，则轮流切换ADC采样通道，每个通道即是红外接收点
+    case STATUS_ADC_IDLE:                                                       //When sampling is possible, the ADC sampling channels are switched in turn, and each channel is the infrared receiving point 
         {
             _u16 adcPin = _adcSamplePairs[_currentSamplePos].adcPin;
             adc_read_start(GET_ADC(IR_SENSOR_SAMPLE_ADC), adcPin);
@@ -222,13 +222,13 @@ static void heartbeat_dev_irdetector()
         break;
     case STATUS_ADC_PENDING:
         {
-            if (adc_read_is_ready(GET_ADC(IR_SENSOR_SAMPLE_ADC))) {             //采样结束，进行采样值的保存
+            if (adc_read_is_ready(GET_ADC(IR_SENSOR_SAMPLE_ADC))) {             //After sampling, save the sampled value 
                 int result = adc_read_final(GET_ADC(IR_SENSOR_SAMPLE_ADC));
 
-                if (_irSampleStage == STATUS_IR_SAMPLE_BACKGROUND) {            //采样、存储背景ADC值
+                if (_irSampleStage == STATUS_IR_SAMPLE_BACKGROUND) {            //Sampling and storing background ADC values 
                     _adcSamplePairs[_currentSamplePos].lastAdcval = result;
 
-                } else {                                                        //采样、存储测距值
+                } else {                                                        //Sampling and storing ranging values 
                     _u16 relatedBit = _adcSamplePairs[_currentSamplePos].bitPos;
                     int adcDiff = _adcSamplePairs[_currentSamplePos].lastAdcval - result;
                     if (adcDiff > IR_SENSOR_DROP_THRESHOLD) {
@@ -241,7 +241,7 @@ static void heartbeat_dev_irdetector()
                 }
                 if (++_currentSamplePos >= _countof(_adcSamplePairs)) {
                     _currentSamplePos = 0;
-                    if (_irSampleStage == STATUS_IR_SAMPLE_BACKGROUND) {        //一轮采样结束，如果是背景采样结束则发红外PWM，进行测距
+                    if (_irSampleStage == STATUS_IR_SAMPLE_BACKGROUND) {        //一Round sampling is over, if it is the end of background sampling, infrared PWM will be emitted for ranging 
 #if defined(CONFIG_BREAKOUT_REV) && (CONFIG_BREAKOUT_REV >= 3)
 #else
                         RAW_PWM_SET(FRONT_IR_E_TIMER_CH, IR_EMITTER_TIMER_ID, IRPWM_TIMER_FRONT_PW);
@@ -249,7 +249,8 @@ static void heartbeat_dev_irdetector()
                         RAW_PWM_SET(BOTTOM_IR_E_TIMER_CH, IR_EMITTER_TIMER_ID, IRPWM_TIMER_BOTTOM_PW);
                         _irSampleStage = STATUS_IR_SAMPLE_LOADED;
 
-                    } else {                                                    //一轮采样结束，如果是测距采样结束则停止发红外PWM，等待下轮背景采样
+                    } else {                                                    //一Round sampling is over, if it is the end of ranging sampling, stop sending infrared PWM and wait for the next round of background sampling 
+
 #if defined(CONFIG_BREAKOUT_REV) && (CONFIG_BREAKOUT_REV >= 3)
 #else
                         RAW_PWM_SET(FRONT_IR_E_TIMER_CH, IR_EMITTER_TIMER_ID, 0);
