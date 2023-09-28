@@ -39,9 +39,10 @@
 
 /**
  @brief Global motor enable port.
+ SDP-Mini motor controller 
  */
-#define MOTO_EN_PORT                GPIOB
-#define MOTO_EN_PIN                 GPIO_Pin_15  /**< PB15 is motor enable. */
+//#define MOTO_EN_PORT                GPIOB
+//#define MOTO_EN_PIN                 GPIO_Pin_15  /**< PB15 is motor enable. */
 
 /**
  @brief Right walking motor hardware configurations.
@@ -66,8 +67,8 @@
 #define MOTO_L_PWM_CHN             4
 #define MOTO_L_PWM                 (GET_TIM(MOTO_L_PWM_ID))
 
-#define MOTO_L_DIR_PORT            GPIOB       /** PB9 is left motor direction. */
-#define MOTO_L_DIR_PIN             GPIO_Pin_9
+#define MOTO_L_DIR_PORT            GPIOB       /** PB15 is left motor direction. */
+#define MOTO_L_DIR_PIN             GPIO_Pin_15
 
 //#define MOTO_LI_MONI_PORT           GPIOD       /**< PD5 is left motor overcurrent monitor. */
 //#define MOTO_LI_MONI_PIN            GPIO_Pin_5
