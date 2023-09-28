@@ -280,10 +280,10 @@ static void _battery_volume_update(void)
 
     if (ISCHARGE_CHRG != charge_detect_getstatus()) {
         /* Discharging. Volume is always getting down. */
-        if (percent >= batteryElectricityPercentage) {
-            return ;
-        }
-        percent = batteryElectricityPercentage - 1;
+        //if (percent >= batteryElectricityPercentage) {
+        //    return ;
+        //}
+        //percent = batteryElectricityPercentage - 1;
     } else {
         /* Charging. Volume is always getting up. */
         if (percent <= batteryElectricityPercentage) {
