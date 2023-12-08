@@ -32,7 +32,7 @@
 
 
 // TURN_RADIUS is half the distance between the wheel centers
-#define TURN_RADIUS                     (147)    // radius for turning in mm. 
+#define TURN_RADIUS                     (139)    // radius for turning in mm. 
     
 #define CONFIG_MOTOR_ENCODER_NUM        2
 #define CONFIG_MOTOR_PWM_PERIOD         (5000)
@@ -94,7 +94,7 @@
 #define ENCODER_RB_PIN              GPIO_Pin_6
 
 // HCR robot
-#define ODOMETER_EST_PULSE_PER_METER  (3946)
+#define ODOMETER_EST_PULSE_PER_METER  (1624)
 /**< This value is calibrate by actual test. */
 //#if defined(CONFIG_MOTOR_ENCODER_NUM) && (CONFIG_MOTOR_ENCODER_NUM == 2)
 //#define ODOMETER_EST_PULSE_PER_METER  (13500UL*4/5)

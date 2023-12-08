@@ -430,6 +430,7 @@ static void _refresh_walkingmotor_odometer(_u32 durationMs)
 
         _motorDeltaTicks[cnt] += _lastEncoderTicksDelta[cnt];
 #ifdef CONFIG_MOTOR_PID_DEBUG
+        static int lastTime = 0;
         if (cnt == 0 && getms() - lastTime > 250) {
           DBG_OUT("dist_mm = %d, _motorDeltaTicks = %d, _lastOdometerSpeedAbs = %d\r\n", 
                   (int)dist_mm, (int)_motorDeltaTicks[cnt], (int)_lastOdometerSpeedAbs[cnt]);
