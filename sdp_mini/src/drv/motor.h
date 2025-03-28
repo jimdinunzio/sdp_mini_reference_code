@@ -32,7 +32,7 @@
 
 
 // TURN_RADIUS is half the distance between the wheel centers
-#define TURN_RADIUS                     (139)    // radius for turning in mm. 
+#define TURN_RADIUS                     (129)    // radius for turning in mm. 
     
 #define CONFIG_MOTOR_ENCODER_NUM        2
 #define CONFIG_MOTOR_PWM_PERIOD         (5000)
