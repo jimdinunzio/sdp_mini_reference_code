@@ -63,8 +63,8 @@
 #define BATT_VOLUME_UPDATE_DURATION      30000  /* Volume updating duration, in ms. */
 // the voltage scale factor to transform the voltage on the ADC pin to the actual battery voltage
 // it is controlled by the resistor network, please refer to the ref design schematic for details
-#define BATTERY_VOLTAGE_FULL    ((int)(12.0 * 1000)) //mV
-#define BATTERY_VOLTAGE_EMPTY   ((int)(7.0 * 1000)) //mV
+#define BATTERY_VOLTAGE_FULL    ((int)(11.6 * 1000)) //mV
+#define BATTERY_VOLTAGE_EMPTY   ((int)(7.5 * 1000)) //mV
 
 void init_battery(void);
 _u32 get_electricity(void);

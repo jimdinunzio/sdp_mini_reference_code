@@ -82,6 +82,12 @@ enum {
 
 static _u8 _currentAdcRead = 1;
 
+#define EMA_ALPHA 0.10f
+static float filteredVoltage = 0.0f;  // persistent across calls
+static float voltageMinDuringDischarge = 0.0f;
+static _u8 previousChargeStatus = 0xFF;  // Invalid init to force first update
+
+#define BATT_VOLT_BIAS  500
 /*
  * charge ADC detection initialization function
  */
@@ -148,7 +154,7 @@ _u32 get_electricity(void)
   //  VBATT / BATT_DETECT_ADC_RATIO = adc_val * ADC_REF / 4096
   const float ADC_TO_BATT_VOLT_FACTOR = (BATT_DETECT_ADC_REF * BATT_DETECT_ADC_RATIO) / ADC_LEVELS;
   const _u32  ADC_TO_BATT_VOLT_FACTOR_fixQ10 = (_u32)(ADC_TO_BATT_VOLT_FACTOR * 1024.0);
-  return (_pwrCachedBattVoltADCVal * ADC_TO_BATT_VOLT_FACTOR_fixQ10)>>10;
+  return ((_pwrCachedBattVoltADCVal * ADC_TO_BATT_VOLT_FACTOR_fixQ10)>>10) + BATT_VOLT_BIAS;
 }
 /*
  * Get battery capacity percentage function
@@ -258,46 +264,76 @@ static void _battery_sample_batteryvoltage()
         break;
     }
 }
+
 static _s32 _battery_volume_calculate(void)
 {
     _s32 percent;
-    _u32 currentVolt = get_electricity();
+    _u32 currentVolt = get_electricity(); // Already averaged 3s samples
 
-    if (currentVolt < BATTERY_VOLTAGE_EMPTY) {
+    // Initialize EMA on first run
+    if (filteredVoltage == 0.0f)
+        filteredVoltage = (float)currentVolt;
+    else
+        filteredVoltage = EMA_ALPHA * (float)currentVolt + (1.0f - EMA_ALPHA) 
+          * filteredVoltage;
+    
+   if (filteredVoltage < BATTERY_VOLTAGE_EMPTY) {
         percent = 0;
-    }   else if (currentVolt > BATTERY_VOLTAGE_FULL) {
+    } else if (filteredVoltage > BATTERY_VOLTAGE_FULL) {
         percent = 100;
     } else {
-        percent = (int)(100.0f * (-0.1700162f - (-0.005948003f / -0.3530656f) 
-                                  * (1.0f - expf(0.0003530656f * currentVolt))));
+        float volts = filteredVoltage / 1000.0f;
+        percent = (int)(100.0f * (0.0349f * volts * volts
+                                  - 0.4255f * volts + 1.2308f));
     }
+
     return percent;
 }
-
 static void _battery_volume_update(void)
 {
+    _u8 currentChargeStatus = charge_detect_getstatus();
     _s32 percent = _battery_volume_calculate();
 
-    if (ISCHARGE_CHRG != charge_detect_getstatus()) {
-        /* Discharging. Volume is always getting down. */
-        //if (percent >= batteryElectricityPercentage) {
-        //    return ;
-        //}
-        //percent = batteryElectricityPercentage - 1;
-    } else {
-        /* Charging. Volume is always getting up. */
-        if (percent <= batteryElectricityPercentage) {
-            return ;
+    if (currentChargeStatus != ISCHARGE_CHRG) {
+        // Discharging
+
+        if (previousChargeStatus == ISCHARGE_CHRG || voltageMinDuringDischarge == 0.0f) {
+            // Just transitioned from charging to discharging — reset watermark
+            voltageMinDuringDischarge = filteredVoltage;
         }
+
+        if (filteredVoltage >= voltageMinDuringDischarge) {
+            // No new low, don't decrease
+            return;
+        }
+
+        // New lower voltage seen — update watermark and decrease SoC
+        voltageMinDuringDischarge = filteredVoltage;
+
+        if (percent >= batteryElectricityPercentage) {
+            return;  // still no drop in percentage
+        }
+
+        percent = batteryElectricityPercentage - 1;
+
+    } else {
+        // Charging
+
+        if (percent <= batteryElectricityPercentage) {
+            return;
+        }
+
         percent = batteryElectricityPercentage + 1;
+
+        // Optionally reset low watermark on charge
+        voltageMinDuringDischarge = 0.0f;
     }
 
-    if (percent < 0) {
-        percent = 0;
-    } else if (percent > 100) {
-        percent = 100;
-    }
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+
     batteryElectricityPercentage = percent;
+    previousChargeStatus = currentChargeStatus;
 }
 
 /*
@@ -379,9 +415,9 @@ void heartbeat_battery(void)
         //Check battery capacity and calculate percentage
         _battery_volume_update();
         bool isCharging = ISCHARGE_CHRG == charge_detect_getstatus();
-        DBG_OUT("%d: Battery voltage %d%%, %dmv%s.\r\n", getms(), 
-          batteryElectricityPercentage, get_electricity(), isCharging ?
-            " [Charging]" : "");
+        DBG_OUT("%d: Battery voltage %d%%, %dmv min=%d%s.\r\n", getms(), 
+          batteryElectricityPercentage, get_electricity(), (int)voltageMinDuringDischarge,
+          isCharging ? " [Charging]" : "");
         if (batteryElectricityPercentage < 15 && !isCharging) {
             {
                 //beep_beeper(3000, 400, chargeSound);
