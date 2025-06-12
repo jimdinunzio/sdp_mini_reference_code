@@ -88,6 +88,8 @@ static float voltageMinDuringDischarge = 0.0f;
 static _u8 previousChargeStatus = 0xFF;  // Invalid init to force first update
 
 #define BATT_VOLT_BIAS  500
+#define RECOVERY_THRESHOLD_MV 750  // 0.75V expressed in millivolts
+
 /*
  * charge ADC detection initialization function
  */
@@ -265,6 +267,11 @@ static void _battery_sample_batteryvoltage()
     }
 }
 
+static void _battery_clear_voltage_filter(void)
+{
+    filteredVoltage = 0.0f;  // Reset EMA
+}
+
 static _s32 _battery_volume_calculate(void)
 {
     _s32 percent;
@@ -279,13 +286,17 @@ static _s32 _battery_volume_calculate(void)
     
    if (filteredVoltage < BATTERY_VOLTAGE_EMPTY) {
         percent = 0;
-    } else if (filteredVoltage > BATTERY_VOLTAGE_FULL) {
+   } else if (filteredVoltage > BATTERY_VOLTAGE_FULL) {
         percent = 100;
-    } else {
+   } else {
         float volts = filteredVoltage / 1000.0f;
         percent = (int)(100.0f * (0.0349f * volts * volts
                                   - 0.4255f * volts + 1.2308f));
-    }
+        
+        // Clamp to ensure no math errors outside bounds
+        if (percent < 0) percent = 0;
+        if (percent > 100) percent = 100;        
+   }
 
     return percent;
 }
@@ -302,6 +313,17 @@ static void _battery_volume_update(void)
             voltageMinDuringDischarge = filteredVoltage;
         }
 
+        float voltageRise = filteredVoltage - voltageMinDuringDischarge;
+
+        if (voltageRise >= RECOVERY_THRESHOLD_MV) {
+            // Significant voltage recovery detected: reset calculation
+            voltageMinDuringDischarge = filteredVoltage;
+            _battery_clear_voltage_filter();
+            batteryElectricityPercentage = percent;  // Fully recompute
+            previousChargeStatus = currentChargeStatus;
+            return;
+        }
+        
         if (filteredVoltage >= voltageMinDuringDischarge) {
             // No new low, don't decrease
             return;
