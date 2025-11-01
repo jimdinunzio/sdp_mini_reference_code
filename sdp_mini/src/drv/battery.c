@@ -82,12 +82,12 @@ enum {
 
 static _u8 _currentAdcRead = 1;
 
-#define EMA_ALPHA 0.10f
+#define EMA_ALPHA 0.25f
 static float filteredVoltage = 0.0f;  // persistent across calls
 static float voltageMinDuringDischarge = 0.0f;
 static _u8 previousChargeStatus = 0xFF;  // Invalid init to force first update
 
-#define BATT_VOLT_BIAS  500
+#define BATT_VOLT_BIAS  0
 #define RECOVERY_THRESHOLD_MV 750  // 0.75V expressed in millivolts
 
 /*
@@ -437,8 +437,8 @@ void heartbeat_battery(void)
         //Check battery capacity and calculate percentage
         _battery_volume_update();
         bool isCharging = ISCHARGE_CHRG == charge_detect_getstatus();
-        DBG_OUT("%d: Battery voltage %d%%, %dmv min=%d%s.\r\n", getms(), 
-          batteryElectricityPercentage, get_electricity(), (int)voltageMinDuringDischarge,
+        DBG_OUT("%d: Battery voltage %d%%, %dmv, min=%d%s.\r\n", getms(), 
+          batteryElectricityPercentage, (int)filteredVoltage, (int)voltageMinDuringDischarge,
           isCharging ? " [Charging]" : "");
         if (batteryElectricityPercentage < 15 && !isCharging) {
             {
