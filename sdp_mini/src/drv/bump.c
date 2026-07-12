@@ -43,12 +43,12 @@ void init_bump_detect(void)
 
     GPIO_Init(BUMP_GPIO, &GPIO_InitStructure);
     
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
-    GPIO_InitStructure.GPIO_Pin = BUMP_PIN_M;
-    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_10MHz;
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
-
-    GPIO_Init(BUMP_GPIO2, &GPIO_InitStructure);
+//    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
+//    GPIO_InitStructure.GPIO_Pin = BUMP_PIN_M;
+//    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_10MHz;
+//    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
+//
+//    GPIO_Init(BUMP_GPIO2, &GPIO_InitStructure);
 }
 /*
  * 获取碰撞状态信息函数
@@ -68,11 +68,11 @@ _u8 get_bump_bitmap(void)
         isBumpedflag |= (1 << 1);
     }
 
-    if ((!PIN_READ(BUMP_GPIO2, BUMP_PIN_M))) {
-        isBumpedflag &= ~(1 << 2);
-    } else {
-        isBumpedflag |= (1 << 2);
-    }
+//    if ((!PIN_READ(BUMP_GPIO2, BUMP_PIN_M))) {
+//        isBumpedflag &= ~(1 << 2);
+//    } else {
+//        isBumpedflag |= (1 << 2);
+//    }
     
     return isBumpedflag;
 }
@@ -81,5 +81,5 @@ _u8 get_bump_bitmap(void)
  */
 _u8 is_bumped(void)
 {
-    return ((get_bump_bitmap() & 0x7) != 0x7);
+    return ((get_bump_bitmap() & 0x3) != 0x3);
 }

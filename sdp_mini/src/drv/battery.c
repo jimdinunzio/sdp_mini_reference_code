@@ -37,6 +37,51 @@
 #define CONFIG_POWERSTATE_CHECK_DURATION       10       //ms
 #define CONFIG_CHARGEBASE_REMOVAL_THRESHOLDTS  100      //ms
 
+// --- Home-charger detection (ACS712ELCTR-05B, in series with the charger leg) ---
+// The sensor carries charger current only - the load current does not pass through it.
+// So this is a clean two-state signal, not an edge to chase. Measured on this board with
+// the LattePanda and Jetson running:
+//     disconnected  ~0 mA    (spread roughly +/-50 mA once the zero is trimmed)
+//     connected     ~1790 mA
+// An absolute threshold with hysteresis is all that is needed.
+//
+// The ACS712's zero-current output is VCC/2 (ratiometric). VCC is a regulated 5.01V, so
+// VIOUT sits at 2505mV at 0A, and the 1/2 divider halves it to 1252.5mV at PC3.
+// Confirmed by a clean capture: disconnected reads ~1257mV (raw ~2065), i.e. ratio 0.502.
+// (0.185 V/A is the Allegro ACS712ELCTR-05B figure; the 200mV/A on sales listings is wrong.)
+#define ACS712_05A_V_PER_A          (0.185f / 2.0f)
+
+// The 0A reference is self-calibrated at boot (see heartbeat_battery). This is only the
+// power-on default, used until that runs. Theoretical (VCC/2)/2:
+//     1252.5mV * 4095 / 2495 = 2056 counts   (measured disconnected: ~2065, sensor offset)
+// NOTE: boot self-zero assumes the robot is NOT on the charger at power-up. It never is
+// (the switch is unreachable while docked). Booting on the charger would calibrate the
+// charge current away as "0A" and break detection.
+#define CHARGE_DETECT_ZERO_ADC      2056
+
+// Disconnected sits at 0mA with a spread of about +/-50mA. The charger is CC/CV, so the
+// connected current is NOT fixed: ~1790mA into a low pack, tapering toward zero as it
+// approaches full. So the attach threshold is set well below the CC current - low enough
+// to catch a partly-tapered charge, still far above the disconnected noise. Detach is
+// lower again, giving hysteresis so a taper cannot chatter the state.
+//
+// KNOWN LIMIT: in the final CV tail the charge current genuinely falls to ~0, which is
+// indistinguishable from being undocked. A full battery on the dock will therefore read
+// "not charging". Current sensing cannot resolve that case; only a charger-presence
+// signal (status pin, or bus voltage pinned at the CV setpoint) could.
+// Placement rules, given disconnected spans -66..+125mA (191mA peak-to-peak) and a CC
+// charge is ~1790mA:
+//   - DETACH must sit above the disconnected noise peak (125mA), with margin.
+//   - ATTACH must sit above DETACH by MORE than the noise peak-to-peak, otherwise noise
+//     alone can cross both lines while the current drifts through the band during taper.
+//   - ATTACH must stay below the weakest real charge current we ever expect to see.
+// 300/700 gives 175mA of clearance under DETACH and a 400mA hysteresis band (~2.1x the
+// noise). Revisit ATTACH once the charge current at a realistic docking SoC is measured -
+// it must stay comfortably below that number.
+#define CHARGE_ATTACH_THRESHOLD_MA  700
+#define CHARGE_DETACH_THRESHOLD_MA  300
+#define CHARGE_DEBOUNCE_SAMPLES     2   // x HOCHARGE_DETECT_UPDATE_DURATION
+
 static _u32 batteryFrequency = 0;
 static _u32 batterySampleFrequency = 0;
 static _u32 chargeFrequency = 0;
@@ -45,9 +90,8 @@ static _u32 chargeCurrentCalibrate = 0;
 static _u32 batteryElectricityPercentage = 0;
 static _u8 chargeSound = 2;
 static _u8 isChargeInserted = 0;
-static _s16 chargeDetectZero = 2047;
-
-static _s32 lastChargeCurrent = 0;
+static _s16 chargeDetectZero = CHARGE_DETECT_ZERO_ADC;
+static _u8  chargeDebounceCnt = 0;
 
 //static _u8 isDcInserted = 0;
 //static _u8 dcInsertedTs = 0;
@@ -126,10 +170,6 @@ static void init_electricity_detect(void)
     DBG_OUT("preheat battery voltage queue avg = %d.\r\n", _pwrCachedBattVoltADCVal);
 }
 
-// ACS712 outputs 2.5v for I=0, and here R1=R2=10K voltage divder divides it 
-// in half to 1.25v for I=0. V per A needs to be divided in half as well.
-#define ACS712_05A_V_PER_A (0.185 / 2.0)
-
 /*
  * Get charge current function
  * Return current value, unit: mA
@@ -181,12 +221,19 @@ static void init_charge_detect(void)
     GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_IPU;
     GPIO_Init(GPIOE, &GPIO_InitStructure);
 
+    // Battery voltage sense stays on PA6 / GPIOA.
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
-    
-    GPIO_InitStructure.GPIO_Pin = HOCHARGE_DETECT_PIN | BATT_DETECT_PIN;
+    GPIO_InitStructure.GPIO_Pin = BATT_DETECT_PIN;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_10MHz;
     GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_AIN;
     GPIO_Init(BATT_AND_CHARGE_DETECT_PORT, &GPIO_InitStructure);
+
+    // Charge current sense is on PC3 (ADC123_IN13), where the ACS712 divider is wired.
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
+    GPIO_InitStructure.GPIO_Pin = HOCHARGE_DETECT_PIN;
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_10MHz;
+    GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_AIN;
+    GPIO_Init(HOCHARGE_DETECT_PORT, &GPIO_InitStructure);
 }
 /*
  * Battery charge status detection function
@@ -309,7 +356,7 @@ static void _battery_volume_update(void)
         // Discharging
 
         if (previousChargeStatus == ISCHARGE_CHRG || voltageMinDuringDischarge == 0.0f) {
-            // Just transitioned from charging to discharging — reset watermark
+            // Just transitioned from charging to discharging ï¿½ reset watermark
             voltageMinDuringDischarge = filteredVoltage;
         }
 
@@ -329,7 +376,7 @@ static void _battery_volume_update(void)
             return;
         }
 
-        // New lower voltage seen — update watermark and decrease SoC
+        // New lower voltage seen ï¿½ update watermark and decrease SoC
         voltageMinDuringDischarge = filteredVoltage;
 
         if (percent >= batteryElectricityPercentage) {
@@ -384,9 +431,11 @@ void heartbeat_battery(void)
               _charge_sample_chargecurrent();
             }
             chargeCurrentCalibrate = true;
+            // Self-zero: the robot is never on the charger at power-up, so whatever the
+            // sensor reads now is 0A. This trims out the ACS712's part-to-part offset.
             chargeDetectZero = _chargeCachedCurrentADCVal;
-            batteryFrequency = getms();            
-            DBG_OUT("Charge current calibration done, charge detect zero = %d/4095 or %dmv current = %d.\r\n",
+            batteryFrequency = getms();
+            DBG_OUT("Charge sense settled, zero = %d/4095 or %dmv, current = %dma.\r\n",
                     chargeDetectZero, chargeDetectZero * HOCHARGE_DETECT_ADC_REF / 4095, get_charge_current());
         }
         return ;
@@ -407,7 +456,6 @@ void heartbeat_battery(void)
 
             DBG_OUT("Battery calibration done, voltage %d, volume %d.\r\n",
                     get_electricity(), batteryElectricityPercentage);
-            lastChargeCurrent = get_charge_current();
 
         }
         return ;
@@ -454,32 +502,46 @@ void heartbeat_battery(void)
     
     // Check if commenced or stopped charging 
     if ((getms() - chargeFrequency) >= HOCHARGE_DETECT_UPDATE_DURATION) {
-        //DBG_OUT("Charge ADC out avg: %d = %dmv\r\n", _chargeCachedCurrentADCVal, _chargeCachedCurrentADCVal * HOCHARGE_DETECT_ADC_REF / 4095 );
-        //DBG_OUT("Charge current %dma.\r\n", get_charge_current());
+        // raw ADC included so a "no change on connect" can be attributed: if raw does not
+        // move when the charger contacts, no current is flowing through the sensor and the
+        // cause is physical (full pack / no contact), not the scaling math.
+//        DBG_OUT("Charge raw=%d (zero=%d) %dmv -> %dma.\r\n",
+//                _chargeCachedCurrentADCVal, chargeDetectZero,
+//                _chargeCachedCurrentADCVal * HOCHARGE_DETECT_ADC_REF / 4095,
+//                get_charge_current());
       chargeFrequency = getms();
 
       _s32 current = get_charge_current();
-      //DBG_OUT("%d: Volts = %d, I = %d\r\n",getms(), _chargeCachedCurrentADCVal * HOCHARGE_DETECT_ADC_REF / 4095, current);
-      if (isChargeInserted) {
-          //Whether it is in the charging state of the charging pile
-          if (current > lastChargeCurrent + 800) { 
-            //under charging pile charging: detect whether it is detached from the charging pile,
-            //and change the charging state of the charging pile after pulling it out
-             DBG_OUT("DETACH from charger detected current %dma.\r\n", get_charge_current());
-             isChargeInserted = 0;
-             beep_beeper(5000, 80, 2);
+
+      // Absolute level with hysteresis, not a delta. The sensor sees charger current
+      // only, so charging reads high and disconnected reads ~0. Keying off the level
+      // rather than an edge also means the state settles correctly when the robot powers
+      // up already sitting on the charger.
+      if (!isChargeInserted) {
+        if (current > CHARGE_ATTACH_THRESHOLD_MA) {
+          if (++chargeDebounceCnt >= CHARGE_DEBOUNCE_SAMPLES) {
+            isChargeInserted = 1;
+            chargeDebounceCnt = 0;
+            beep_beeper(5000, 80, 2);
+            DBG_OUT("ATTACH to charger detected, current %dma.\r\n", current);
           }
+        } else {
+          chargeDebounceCnt = 0;
+        }
+      } else {
+        if (current < CHARGE_DETACH_THRESHOLD_MA) {
+          if (++chargeDebounceCnt >= CHARGE_DEBOUNCE_SAMPLES) {
+            isChargeInserted = 0;
+            chargeDebounceCnt = 0;
+            // 2000Hz, deliberately distinct: 3000Hz is the bumper and 4000Hz is both the
+            // motor-stall and on-ground beeps, so a docking event stays identifiable by ear.
+            beep_beeper(2000, 80, 2);
+            DBG_OUT("DETACH from charger detected, current %dma.\r\n", current);
+          }
+        } else {
+          chargeDebounceCnt = 0;
+        }
       }
-      else { // !isChargeInserted
-        // Not under charging from the charging station: check whether it 
-        // has made contact and started charging
-        if (current < lastChargeCurrent - 800) { // count sequential - monotonic samples in current
-          isChargeInserted = 1;
-          beep_beeper(5000, 80, 2);
-          DBG_OUT("ATTACH to charger detected, current %dma.\r\n", get_charge_current());
-        } 
-      }      
-      lastChargeCurrent = current;
     }
 #if 0
     if (isDcInserted) {
