@@ -50,10 +50,22 @@
 // tick x CHARGE_DEBOUNCE_SAMPLES(2) worst-case detection
 #define HOCHARGE_DETECT_UPDATE_DURATION 100
 
-#define BATT_DETECT_PIN         GPIO_Pin_6 //PA6 ADC12_IN6
+// The battery divider is physically wired to PA0. PA6 was used while PA0 carried the
+// charge-current sense; PA0 was freed when that moved to PC3, so the sense is back on the
+// pin the divider actually lands on.
+#define BATT_DETECT_PIN         GPIO_Pin_0 //PA0 ADC123_IN0
 #define BATT_DETECT_ADC         1
-#define BATT_DETECT_ADC_CHN     6
-#define BATT_DETECT_ADC_RATIO   11.0f
+#define BATT_DETECT_ADC_CHN     0
+// PROVISIONAL - this is NOT a validated calibration. 6.40 came from a single pair of DMM
+// readings (12.20V at the battery terminals, 1.905V at PA0), and a later second reading
+// disproved it: at a pack voltage of 11.0V the pin read 1.93V. The pin rose as the pack
+// fell, and a passive divider off the battery cannot have a negative slope - so PA0 is fed
+// from the regulated 12V rail, not the raw pack, and 6.40 was a coincidence of the pack
+// sitting near rail voltage that day. No ratio value can fix a wiring problem. Recalibrate
+// against a meter once a tap is added to the raw battery screw terminals; until then
+// get_electricity() reports a near-constant ~12.4V and the 15% low-battery beep in
+// heartbeat_battery() will never fire.
+#define BATT_DETECT_ADC_RATIO   6.40f
 #define BATT_DETECT_ADC_REF     2495
 
 #define ISCHARGE_FAULT            0x0
@@ -64,10 +76,10 @@
 #define BATT_VOLUME_CALIBRATING_DURATION 5000   /* Volume calibrating duration, in ms. */
 #define BATT_SAMPLE_DURATION 30000 / 10
 #define BATT_VOLUME_UPDATE_DURATION      30000  /* Volume updating duration, in ms. */
-// the voltage scale factor to transform the voltage on the ADC pin to the actual battery voltage
-// it is controlled by the resistor network, please refer to the ref design schematic for details
-#define BATTERY_VOLTAGE_FULL    ((int)(11.6 * 1000)) //mV
-#define BATTERY_VOLTAGE_EMPTY   ((int)(7.5 * 1000)) //mV
+// TalentCell PB120B1, 3S4P 18650 Li-ion. Spec range 9.0V - 12.6V (3.00 - 4.20V/cell).
+// These must stay pinned to the end points of BATT_SOC_CURVE in battery.c.
+#define BATTERY_VOLTAGE_FULL    ((int)(12.6 * 1000)) //mV
+#define BATTERY_VOLTAGE_EMPTY   ((int)(9.0 * 1000)) //mV
 
 void init_battery(void);
 _u32 get_electricity(void);

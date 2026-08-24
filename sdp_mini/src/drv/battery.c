@@ -126,13 +126,17 @@ enum {
 
 static _u8 _currentAdcRead = 1;
 
+// At a BATT_VOLUME_UPDATE_DURATION cadence of 30s, alpha 0.10 is roughly a 5-minute time
+// constant. This is the smoothing that keeps load sag off the gauge.
 #define EMA_ALPHA 0.10f
 static float filteredVoltage = 0.0f;  // persistent across calls
-static float voltageMinDuringDischarge = 0.0f;
-static _u8 previousChargeStatus = 0xFF;  // Invalid init to force first update
 
-#define BATT_VOLT_BIAS  500
-#define RECOVERY_THRESHOLD_MV 750  // 0.75V expressed in millivolts
+// Was 500mV, to pull the PA6 reading (nominal 11:1 ratio, never calibrated) up to what the
+// LED volt display showed. That fudge was tied to the old ratio, so it goes away with it.
+// Zero is the honest value here: the remaining error lives in BATT_DETECT_ADC_RATIO, which
+// is provisional (see battery.h), and stacking a second correction on top would only hide
+// which one is wrong. Leave this at 0 and fix the ratio once PA0 taps the raw pack.
+#define BATT_VOLT_BIAS  0
 
 /*
  * charge ADC detection initialization function
@@ -221,7 +225,7 @@ static void init_charge_detect(void)
     GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_IPU;
     GPIO_Init(GPIOE, &GPIO_InitStructure);
 
-    // Battery voltage sense stays on PA6 / GPIOA.
+    // Battery voltage sense is on PA0 (ADC123_IN0), where the battery divider is wired.
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
     GPIO_InitStructure.GPIO_Pin = BATT_DETECT_PIN;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_10MHz;
@@ -314,95 +318,106 @@ static void _battery_sample_batteryvoltage()
     }
 }
 
-static void _battery_clear_voltage_filter(void)
-{
-    filteredVoltage = 0.0f;  // Reset EMA
-}
+// Standard 18650 Li-ion open-circuit discharge curve, scaled x3 for the 3S4P pack
+// (TalentCell PB120B1: 12.6V full = 4.20V/cell, 9.0V empty = 3.00V/cell). Parallel groups
+// do not change the voltage, only the capacity, so the per-cell curve applies as-is.
+//
+// A quadratic cannot represent this shape: Li-ion is flat from 90% down to 20% and then
+// falls off a cliff, so the table is dense through the knee and coarse across the plateau.
+// Must stay ordered from full to empty - the lookup below walks it in that direction.
+static const struct {
+    _u16 mv;
+    _u8  percent;
+} BATT_SOC_CURVE[] = {
+    {12600, 100},   // 4.20V/cell
+    {12180,  90},   // 4.06
+    {11940,  80},   // 3.98
+    {11760,  70},   // 3.92
+    {11610,  60},   // 3.87
+    {11460,  50},   // 3.82
+    {11370,  40},   // 3.79
+    {11250,  30},   // 3.75
+    {11100,  20},   // 3.70
+    {10800,  10},   // 3.60
+    {10500,   5},   // 3.50
+    { 9000,   0},   // 3.00 - knee; below here the pack is done
+};
+#define BATT_SOC_CURVE_POINTS (sizeof(BATT_SOC_CURVE) / sizeof(BATT_SOC_CURVE[0]))
 
 static _s32 _battery_volume_calculate(void)
 {
     _s32 percent;
     _u32 currentVolt = get_electricity(); // Already averaged 3s samples
+    _u32 i;
 
     // Initialize EMA on first run
     if (filteredVoltage == 0.0f)
         filteredVoltage = (float)currentVolt;
     else
-        filteredVoltage = EMA_ALPHA * (float)currentVolt + (1.0f - EMA_ALPHA) 
+        filteredVoltage = EMA_ALPHA * (float)currentVolt + (1.0f - EMA_ALPHA)
           * filteredVoltage;
-    
-   if (filteredVoltage < BATTERY_VOLTAGE_EMPTY) {
-        percent = 0;
-   } else if (filteredVoltage > BATTERY_VOLTAGE_FULL) {
+
+   if (filteredVoltage >= BATTERY_VOLTAGE_FULL) {
         percent = 100;
+   } else if (filteredVoltage <= BATTERY_VOLTAGE_EMPTY) {
+        percent = 0;
    } else {
-        float volts = filteredVoltage / 1000.0f;
-        percent = (int)(100.0f * (0.0349f * volts * volts
-                                  - 0.4255f * volts + 1.2308f));
-        
-        // Clamp to ensure no math errors outside bounds
+        _s32 mv = (_s32)filteredVoltage;
+
+        // Walk down to the first point at or below mv, then interpolate linearly between
+        // that point and the one above it. i >= 1 here: the mv >= FULL case is handled above.
+        for (i = 1; i < BATT_SOC_CURVE_POINTS; ++i) {
+            if (mv >= (_s32)BATT_SOC_CURVE[i].mv) break;
+        }
+
+        percent = BATT_SOC_CURVE[i].percent
+                + (mv - (_s32)BATT_SOC_CURVE[i].mv)
+                  * (BATT_SOC_CURVE[i-1].percent - BATT_SOC_CURVE[i].percent)
+                  / ((_s32)BATT_SOC_CURVE[i-1].mv - (_s32)BATT_SOC_CURVE[i].mv);
+
         if (percent < 0) percent = 0;
-        if (percent > 100) percent = 100;        
+        if (percent > 100) percent = 100;
    }
 
     return percent;
 }
+// Phone-style gauge: the displayed number moves at most one point per update, and it only
+// moves in the direction the pack is actually going - down while discharging, up while
+// charging. It never jumps and never reverses mid-discharge.
+//
+// This replaces the old voltage-watermark + 750mV recovery scheme. That was a second ratchet,
+// on voltage, layered under this one, and the recovery branch was the only path that could
+// push the displayed percentage back UP during a discharge - the exact bounce we do not want.
+// The ratchet below already delivers monotonicity on its own, so the watermark bought nothing
+// the EMA in _battery_volume_calculate was not already doing.
+//
+// Consequence worth knowing: there is no resync path any more. If the curve is wrong the gauge
+// converges at 1 point per BATT_VOLUME_UPDATE_DURATION (2%/min) rather than snapping. That is
+// the trade for never bouncing, and it is why the curve needs to be fitted to loaded voltage.
+//
+// The deadband is what stops the gauge nibbling itself down (the original SLAMTEC behaviour):
+// a strict "step whenever the curve reads lower" ratchets away a point on every transient sag,
+// and monotonicity means it never comes back. Requiring the curve to disagree by BATT_SOC_
+// DEADBAND points before stepping ignores sag-sized noise while still tracking a real decline.
+// Cost: the gauge lags the curve by up to DEADBAND points, hence the endpoint escapes below -
+// without them it would stall short of 0% and 100% and never arrive.
+#define BATT_SOC_DEADBAND 3
+
 static void _battery_volume_update(void)
 {
     _u8 currentChargeStatus = charge_detect_getstatus();
     _s32 percent = _battery_volume_calculate();
+    _s32 shown = (_s32)batteryElectricityPercentage;
 
-    if (currentChargeStatus != ISCHARGE_CHRG) {
-        // Discharging
-
-        if (previousChargeStatus == ISCHARGE_CHRG || voltageMinDuringDischarge == 0.0f) {
-            // Just transitioned from charging to discharging � reset watermark
-            voltageMinDuringDischarge = filteredVoltage;
+    if (currentChargeStatus == ISCHARGE_CHRG) {
+        if (shown < 100 && (percent >= shown + BATT_SOC_DEADBAND || percent == 100)) {
+            batteryElectricityPercentage++;
         }
-
-        float voltageRise = filteredVoltage - voltageMinDuringDischarge;
-
-        if (voltageRise >= RECOVERY_THRESHOLD_MV) {
-            // Significant voltage recovery detected: reset calculation
-            voltageMinDuringDischarge = filteredVoltage;
-            _battery_clear_voltage_filter();
-            batteryElectricityPercentage = percent;  // Fully recompute
-            previousChargeStatus = currentChargeStatus;
-            return;
-        }
-        
-        if (filteredVoltage >= voltageMinDuringDischarge) {
-            // No new low, don't decrease
-            return;
-        }
-
-        // New lower voltage seen � update watermark and decrease SoC
-        voltageMinDuringDischarge = filteredVoltage;
-
-        if (percent >= batteryElectricityPercentage) {
-            return;  // still no drop in percentage
-        }
-
-        percent = batteryElectricityPercentage - 1;
-
     } else {
-        // Charging
-
-        if (percent <= batteryElectricityPercentage) {
-            return;
+        if (shown > 0 && (percent <= shown - BATT_SOC_DEADBAND || percent == 0)) {
+            batteryElectricityPercentage--;
         }
-
-        percent = batteryElectricityPercentage + 1;
-
-        // Optionally reset low watermark on charge
-        voltageMinDuringDischarge = 0.0f;
     }
-
-    if (percent < 0) percent = 0;
-    if (percent > 100) percent = 100;
-
-    batteryElectricityPercentage = percent;
-    previousChargeStatus = currentChargeStatus;
 }
 
 /*
@@ -485,8 +500,10 @@ void heartbeat_battery(void)
         //Check battery capacity and calculate percentage
         _battery_volume_update();
         bool isCharging = ISCHARGE_CHRG == charge_detect_getstatus();
-        DBG_OUT("%d: Battery voltage %d%%, %dmv min=%d%s.\r\n", getms(), 
-          batteryElectricityPercentage, get_electricity(), (int)voltageMinDuringDischarge,
+        // %dmv is the raw averaged terminal reading, untouched by the gauge smoothing - this
+        // is the column to capture for a discharge-curve fit.
+        DBG_OUT("%d: Battery voltage %d%%, %dmv ema=%d%s.\r\n", getms(),
+          batteryElectricityPercentage, get_electricity(), (int)filteredVoltage,
           isCharging ? " [Charging]" : "");
         if (batteryElectricityPercentage < 15 && !isCharging) {
             {
