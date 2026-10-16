@@ -128,14 +128,21 @@ static _u8 _currentAdcRead = 1;
 
 // At a BATT_VOLUME_UPDATE_DURATION cadence of 30s, alpha 0.10 is roughly a 5-minute time
 // constant. This is the smoothing that keeps load sag off the gauge.
+// The filter starts as a plain running mean (alpha = 1/n) and hands over to the EMA once
+// 1/n drops below EMA_ALPHA, i.e. after 10 samples (~5 min). Seeding the EMA from the single
+// boot snapshot instead would let one sagged reading drag the gauge for minutes.
 #define EMA_ALPHA 0.10f
 static float filteredVoltage = 0.0f;  // persistent across calls
+static _u32  filteredSamples = 0;
+
+// The robot takes ~5 minutes to fully boot. Until this much time has passed since power-up,
+// the displayed percentage tracks the curve directly in both directions, so a bad boot
+// reading is corrected instead of being locked in by the down-only gauge.
+#define BATT_SOC_SETTLE_DURATION  (6 * 60 * 1000)  // ms since boot
 
 // Was 500mV, to pull the PA6 reading (nominal 11:1 ratio, never calibrated) up to what the
 // LED volt display showed. That fudge was tied to the old ratio, so it goes away with it.
-// Zero is the honest value here: the remaining error lives in BATT_DETECT_ADC_RATIO, which
-// is provisional (see battery.h), and stacking a second correction on top would only hide
-// which one is wrong. Leave this at 0 and fix the ratio once PA0 taps the raw pack.
+// BATT_DETECT_ADC_RATIO is now DMM-verified (see battery.h), so no bias is needed.
 #define BATT_VOLT_BIAS  0
 
 /*
@@ -318,29 +325,20 @@ static void _battery_sample_batteryvoltage()
     }
 }
 
-// Standard 18650 Li-ion open-circuit discharge curve, scaled x3 for the 3S4P pack
-// (TalentCell PB120B1: 12.6V full = 4.20V/cell, 9.0V empty = 3.00V/cell). Parallel groups
-// do not change the voltage, only the capacity, so the per-cell curve applies as-is.
-//
-// A quadratic cannot represent this shape: Li-ion is flat from 90% down to 20% and then
-// falls off a cliff, so the table is dense through the knee and coarse across the plateau.
+// SoC curve taken from the pack's own 4-LED gauge: the DMM-measured voltage at which each LED
+// step was observed, linearly interpolated between steps. The 0% end is an estimate rather
+// than a measurement. The pack gauge is the reference this robot's percentage is meant to
+// agree with, so it is the source of truth here, not a generic Li-ion curve.
 // Must stay ordered from full to empty - the lookup below walks it in that direction.
 static const struct {
     _u16 mv;
     _u8  percent;
 } BATT_SOC_CURVE[] = {
-    {12600, 100},   // 4.20V/cell
-    {12180,  90},   // 4.06
-    {11940,  80},   // 3.98
-    {11760,  70},   // 3.92
-    {11610,  60},   // 3.87
-    {11460,  50},   // 3.82
-    {11370,  40},   // 3.79
-    {11250,  30},   // 3.75
-    {11100,  20},   // 3.70
-    {10800,  10},   // 3.60
-    {10500,   5},   // 3.50
-    { 9000,   0},   // 3.00 - knee; below here the pack is done
+    {12000, 100},   // 4 LEDs
+    {11500,  75},   // 3 LEDs
+    {10400,  50},   // 2 LEDs
+    { 9240,  25},   // 1 LED
+    { 7000,   0},   // estimated, not measured
 };
 #define BATT_SOC_CURVE_POINTS (sizeof(BATT_SOC_CURVE) / sizeof(BATT_SOC_CURVE[0]))
 
@@ -350,12 +348,11 @@ static _s32 _battery_volume_calculate(void)
     _u32 currentVolt = get_electricity(); // Already averaged 3s samples
     _u32 i;
 
-    // Initialize EMA on first run
-    if (filteredVoltage == 0.0f)
-        filteredVoltage = (float)currentVolt;
-    else
-        filteredVoltage = EMA_ALPHA * (float)currentVolt + (1.0f - EMA_ALPHA)
-          * filteredVoltage;
+    // Running mean for the first samples, then EMA (the first sample has alpha 1, i.e. seeds).
+    float alpha = 1.0f / (float)(++filteredSamples);
+    if (alpha < EMA_ALPHA)
+        alpha = EMA_ALPHA;
+    filteredVoltage = alpha * (float)currentVolt + (1.0f - alpha) * filteredVoltage;
 
    if (filteredVoltage >= BATTERY_VOLTAGE_FULL) {
         percent = 100;
@@ -391,7 +388,8 @@ static _s32 _battery_volume_calculate(void)
 // The ratchet below already delivers monotonicity on its own, so the watermark bought nothing
 // the EMA in _battery_volume_calculate was not already doing.
 //
-// Consequence worth knowing: there is no resync path any more. If the curve is wrong the gauge
+// Consequence worth knowing: the only resync is the BATT_SOC_SETTLE_DURATION window after
+// boot, where the gauge follows the curve freely. After that, if the curve is wrong the gauge
 // converges at 1 point per BATT_VOLUME_UPDATE_DURATION (2%/min) rather than snapping. That is
 // the trade for never bouncing, and it is why the curve needs to be fitted to loaded voltage.
 //
@@ -408,6 +406,11 @@ static void _battery_volume_update(void)
     _u8 currentChargeStatus = charge_detect_getstatus();
     _s32 percent = _battery_volume_calculate();
     _s32 shown = (_s32)batteryElectricityPercentage;
+
+    if (getms() < BATT_SOC_SETTLE_DURATION) {
+        batteryElectricityPercentage = percent;
+        return;
+    }
 
     if (currentChargeStatus == ISCHARGE_CHRG) {
         if (shown < 100 && (percent >= shown + BATT_SOC_DEADBAND || percent == 100)) {
